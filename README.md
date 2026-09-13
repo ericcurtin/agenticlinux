@@ -87,16 +87,17 @@ docker build --build-arg VARIANT=kinoite -t agenticlinux:kinoite .
 
 [test/](test) holds the VM smoke test. CI layers `test/Dockerfile` (a `test`
 user and the in-guest script) on the built image, installs it to a disk with
-`bootc install to-disk --source-imgref docker-daemon:...`, and boots it under
-qemu with `systemd.run=` pointing at the script; the result is read from the
-serial console. To run it locally:
+`bootc install to-disk` reading the OCI layout `docker save` produces, and boots
+it under qemu with `systemd.run=` pointing at the script; the result is read
+from the serial console. To run it locally:
 
 ```sh
 docker build -f test/Dockerfile --build-arg IMAGE=agenticlinux:kinoite -t agenticlinux:smoke .
-truncate -s 30G disk.raw
-docker run --rm --privileged --pid=host -v /dev:/dev -v /var/run/docker.sock:/var/run/docker.sock \
-  -v "$PWD:/vm" agenticlinux:smoke bootc install to-disk --via-loopback \
-  --source-imgref docker-daemon:agenticlinux:smoke --generic-image --skip-fetch-check \
+mkdir oci && docker save agenticlinux:smoke | tar x -C oci
+truncate -s 60G disk.raw
+docker run --rm --privileged --pid=host -v /dev:/dev -v "$PWD:/vm" \
+  -v "$PWD/usr/lib/bootc/install:/usr/lib/bootc/install:ro" quay.io/fedora/fedora-bootc:44 \
+  bootc install to-disk --via-loopback --source-imgref oci:/vm/oci --generic-image --skip-fetch-check \
   --karg systemd.run=/usr/bin/smoke-vm --karg systemd.run_success_action=poweroff \
   --karg systemd.run_failure_action=poweroff --karg console=ttyS0 --karg console=ttyAMA0 /vm/disk.raw
 test/smoke.sh disk.raw

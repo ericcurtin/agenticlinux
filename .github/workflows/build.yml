@@ -63,25 +63,30 @@ jobs:
           path: ${{ runner.temp }}/image.tar
           compression-level: 0
           retention-days: 1
-      - name: Load image
+      - name: Install into a disk image
+        # bootc reads the image straight from the OCI layout; the docker-daemon
+        # transport would first spool a 20 GB uncompressed tar into /var/tmp
+        env:
+          VARIANT: ${{ matrix.variant }}
         run: |
           docker load -i "$RUNNER_TEMP/image.tar"
           rm "$RUNNER_TEMP/image.tar"
           docker buildx prune -af
-      - name: Install into a disk image
-        env:
-          VARIANT: ${{ matrix.variant }}
-        run: |
           docker build -f test/Dockerfile --build-arg "IMAGE=agenticlinux:$VARIANT" -t agenticlinux:smoke .
-          truncate -s 30G disk.raw
-          docker run --rm --privileged --pid=host -v /dev:/dev \
-            -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/vm" agenticlinux:smoke \
-            bootc install to-disk --via-loopback --source-imgref docker-daemon:agenticlinux:smoke \
+          mkdir oci && docker save agenticlinux:smoke | tar x -C oci
+          docker image rm agenticlinux:smoke "agenticlinux:$VARIANT"
+          truncate -s 60G disk.raw
+          docker run --rm --privileged --pid=host -v /dev:/dev -v "$PWD:/vm" \
+            -v "$PWD/usr/lib/bootc/install:/usr/lib/bootc/install:ro" \
+            quay.io/fedora/fedora-bootc:${{ env.FEDORA }} \
+            bootc install to-disk --via-loopback --source-imgref oci:/vm/oci \
             --target-imgref "$IMAGE:${VARIANT%-atomic}" --generic-image --skip-fetch-check \
             --karg systemd.run=/usr/bin/smoke-vm --karg systemd.run_success_action=poweroff \
             --karg systemd.run_failure_action=poweroff --karg console=ttyS0 --karg console=ttyAMA0 \
             /vm/disk.raw
+          sudo rm -rf oci
           sudo chown "$USER" disk.raw
+          df -h /
       - name: Boot and smoke test
         run: |
           sudo apt-get install -y qemu-system-x86 qemu-system-arm qemu-utils

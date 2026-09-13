@@ -4,6 +4,9 @@
 trap '[ $? -eq 0 ] || echo SMOKE FAIL' EXIT
 set -eux
 systemctl start multi-user.target network-online.target
+# /boot is an idle-unmounting automount that bootc itself cannot retrigger
+# (bootc-dev/bootc#2402); any other access remounts it
+ls /boot >/dev/null
 bootc status
 docker run --rm hello-world
 for c in "sbx version" "llmman --version" "opencode --version" "codex --version" \
