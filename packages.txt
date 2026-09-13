@@ -7,6 +7,16 @@ containerd.io
 docker-buildx-plugin
 docker-compose-plugin
 
+# --- GPU (ROCm and the NVIDIA driver are handled in build.sh) ---------------
+vulkan-loader
+vulkan-tools
+mesa-vulkan-drivers
+akmods
+nvidia-container-toolkit
+
+# --- Agents (claude, codex, opencode, openclaw are npm installed in build.sh)
+nodejs-npm
+
 # --- Wayland utilities ------------------------------------------------------
 xdg-desktop-portal-gtk
 grim

@@ -1,0 +1,3 @@
+# Root filesystem (holds /var, /home and /root) for bootc install and the ISO
+[install.filesystem.root]
+type = "xfs"

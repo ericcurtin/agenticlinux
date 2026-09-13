@@ -4,8 +4,9 @@ Fedora 44 [bootc](https://bootc-dev.github.io/bootc/) desktops built on
 [fedora-ostree-desktops](https://quay.io/organization/fedora-ostree-desktops)
 with [Docker Engine](https://docs.docker.com/engine/),
 [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/),
-[llmman](https://github.com/llmmanorg/llmman) and a developer toolset
-preinstalled. x86_64 and aarch64.
+[llmman](https://github.com/llmmanorg/llmman), the `claude`, `codex`,
+`opencode` and `openclaw` agents, GPU runtimes (Vulkan, ROCm, NVIDIA/CUDA) and
+a developer toolset preinstalled. x86_64 and aarch64.
 
 | Variant    | Desktop       | Image                                   |
 |------------|---------------|-----------------------------------------|
@@ -39,6 +40,8 @@ Or switch an existing Fedora Atomic / bootc system:
 sudo bootc switch docker.io/ericcurtin044/agenticlinux:kinoite
 ```
 
+The root filesystem (which holds `/var`, `/home` and `/root`) defaults to xfs.
+
 After the first boot, add yourself to the `docker` and `kvm` groups
 (Docker Sandboxes need `/dev/kvm`):
 
@@ -46,11 +49,27 @@ After the first boot, add yourself to the `docker` and `kvm` groups
 sudo usermod -aG docker,kvm "$USER"
 ```
 
+## GPUs
+
+- Vulkan: Mesa drivers and `vulkaninfo`.
+- ROCm (x86_64): HIP runtime, OpenCL, rocBLAS, hipBLAS, hipBLASLt, RCCL,
+  `rocminfo`, `rocm-smi`. Containers get GPU access with
+  `--device /dev/kfd --device /dev/dri`.
+- NVIDIA: the RPM Fusion driver with the kernel module prebuilt for the
+  image's kernel, CUDA driver libraries and `nvidia-container-toolkit`
+  registered with Docker (`docker run --gpus all ...`). The module is
+  unsigned, so disable Secure Boot or enroll your own MOK. nouveau is
+  blacklisted via kernel arguments.
+
+Prebuilt llama.cpp and vLLM (wheels or containers) bundle their own CUDA and
+ROCm user-space libraries; the host side above is what they need.
+
 ## What's inside
 
-See [packages.txt](packages.txt). Extra repositories used: RPM Fusion,
-Docker's Fedora repo and mise's rpm repo. Docker Sandboxes and llmman are
-installed from their GitHub releases.
+See [packages.txt](packages.txt) and [build.sh](build.sh). Extra
+repositories used: RPM Fusion, Docker's Fedora repo, mise's rpm repo and
+NVIDIA's container toolkit repo. Docker Sandboxes and llmman are installed
+from their GitHub releases; the agents from npm.
 
 ## Build locally
 
