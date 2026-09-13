@@ -1,0 +1,51 @@
+#!/bin/bash
+# Boot a smoke-test disk (built from test/Dockerfile with bootc install) under
+# qemu and wait for the in-guest smoke-vm to report over the serial console.
+# Works on Linux (kvm or tcg), macOS (hvf) and Windows Git Bash (whpx).
+#
+# Usage: test/smoke.sh disk.{raw,qcow2} [x86_64|aarch64]
+set -euo pipefail
+
+disk=$1
+arch=${2:-$(uname -m)}
+timeout=${SMOKE_TIMEOUT:-2700}
+
+case "$arch" in
+  x86_64) qemu=qemu-system-x86_64 machine=q35 ;;
+  aarch64) qemu=qemu-system-aarch64 machine=virt ;;
+esac
+
+cpu=host
+case "$(uname -s)" in
+  Linux) if [ -e /dev/kvm ]; then accel=kvm; else accel=tcg,thread=multi cpu=max; fi ;;
+  Darwin) accel=hvf ;;
+  *) accel=whpx,kernel-irqchip=off cpu=max ;;
+esac
+
+# Copy the firmware next to the disk: keeps qemu's arguments free of absolute
+# paths, which MSYS on Windows would otherwise rewrite.
+bin=$(dirname "$(command -v "$qemu")")
+for f in "$bin/../share/qemu/edk2-$arch-code.fd" "$bin/share/edk2-$arch-code.fd" \
+         /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/AAVMF/AAVMF_CODE.fd; do
+  case "$f" in *OVMF*) [ "$arch" = x86_64 ] || continue ;; *AAVMF*) [ "$arch" = aarch64 ] || continue ;; esac
+  [ -e "$f" ] && cp "$f" firmware.fd && break
+done
+
+rm -f serial.log
+"$qemu" -M "$machine" -accel "$accel" -cpu "$cpu" -smp 4 -m 4G -no-reboot \
+  -display none -monitor none -serial file:serial.log \
+  -drive if=pflash,format=raw,readonly=on,file=firmware.fd \
+  -drive file="$disk",if=virtio,format="${disk##*.}" \
+  -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
+  -device virtio-rng-pci &
+pid=$!
+
+for ((t = 0; t < timeout; t += 10)); do
+  kill -0 "$pid" 2>/dev/null || break
+  sleep 10
+done
+kill "$pid" 2>/dev/null || true
+wait "$pid" 2>/dev/null || true
+
+cat serial.log
+grep -q "SMOKE PASS" serial.log

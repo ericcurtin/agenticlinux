@@ -18,11 +18,14 @@ a developer toolset preinstalled. x86_64 and aarch64.
 | budgie     | Budgie        | `docker.io/ericcurtin044/agenticlinux:budgie`     |
 | base       | none          | `docker.io/ericcurtin044/agenticlinux:base`       |
 
-Every push to `main` builds all variants, pushes them to
-[Docker Hub](https://hub.docker.com/r/ericcurtin044/agenticlinux) and publishes
-an installer ISO per variant and architecture on
+Every push to `main` builds all variants, boots each one in a VM and smoke
+tests Docker, Podman, Docker Sandboxes, llmman and the agents (x86_64 and
+aarch64 on Linux runners, plus the x86_64 disks on macOS Intel and Windows
+runners). Only if everything passes are the images pushed to
+[Docker Hub](https://hub.docker.com/r/ericcurtin044/agenticlinux) and an
+installer ISO per variant and architecture published on
 [GitHub Releases](https://github.com/ericcurtin/agenticlinux/releases).
-Images are also tagged `<variant>-<release>` matching the release tag.
+Images are also tagged `<variant>-<release>` and `<variant>-<release>-<arch>`.
 
 ## Install
 
@@ -79,6 +82,25 @@ docker build --build-arg VARIANT=kinoite -t agenticlinux:kinoite .
 
 `VARIANT` is the fedora-ostree-desktops image name: `kinoite`, `silverblue`,
 `sway-atomic`, `cosmic-atomic`, `xfce-atomic`, `budgie-atomic`, `base-atomic`.
+
+## Smoke test
+
+[test/](test) holds the VM smoke test. CI layers `test/Dockerfile` (a `test`
+user and the in-guest script) on the built image, installs it to a disk with
+`bootc install to-disk --source-imgref docker-daemon:...`, and boots it under
+qemu with `systemd.run=` pointing at the script; the result is read from the
+serial console. To run it locally:
+
+```sh
+docker build -f test/Dockerfile --build-arg IMAGE=agenticlinux:kinoite -t agenticlinux:smoke .
+truncate -s 30G disk.raw
+docker run --rm --privileged --pid=host -v /dev:/dev -v /var/run/docker.sock:/var/run/docker.sock \
+  -v "$PWD:/vm" agenticlinux:smoke bootc install to-disk --via-loopback \
+  --source-imgref docker-daemon:agenticlinux:smoke --generic-image --skip-fetch-check \
+  --karg systemd.run=/usr/bin/smoke-vm --karg systemd.run_success_action=poweroff \
+  --karg systemd.run_failure_action=poweroff --karg console=ttyS0 --karg console=ttyAMA0 /vm/disk.raw
+test/smoke.sh disk.raw
+```
 
 ## CI configuration
 

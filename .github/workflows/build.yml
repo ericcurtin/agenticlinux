@@ -18,28 +18,20 @@ concurrency:
 jobs:
   setup:
     runs-on: ubuntu-24.04
-    permissions:
-      contents: write
     outputs:
       tag: ${{ steps.out.outputs.tag }}
       variants: ${{ steps.out.outputs.variants }}
     steps:
       - id: out
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          tag="$FEDORA.$(date -u +%Y%m%d).$GITHUB_RUN_NUMBER"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "tag=$FEDORA.$(date -u +%Y%m%d).$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
           echo 'variants=["kinoite","silverblue","sway-atomic","cosmic-atomic","xfce-atomic","budgie-atomic","base-atomic"]' >> "$GITHUB_OUTPUT"
-          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
-            --title "$tag" --notes "Images: https://hub.docker.com/r/${{ vars.DOCKER_HUB_USER }}/agenticlinux/tags?name=$tag
 
-          ISOs larger than 2 GiB are split; reassemble with
-          \`cat agenticlinux-<variant>-<arch>.iso.part* > agenticlinux-<variant>-<arch>.iso\`
-          and verify against the .sha256 file."
-
+  # Build each variant natively, boot it in a VM and run the smoke test.
+  # Nothing is pushed anywhere yet; the image is handed on as an artifact.
   build:
     needs: setup
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix:
@@ -54,43 +46,95 @@ jobs:
           docker system prune -af
           df -h /
       - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          username: ${{ vars.DOCKER_HUB_USER }}
-          password: ${{ secrets.DOCKER_HUB_PAT }}
-      - id: build
-        uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v6
         with:
           context: .
           build-args: |
             VARIANT=${{ matrix.variant }}
             FEDORA=${{ env.FEDORA }}
-          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
-          provenance: false
-      - run: |
-          mkdir digests
-          digest="${{ steps.build.outputs.digest }}"
-          touch "digests/${digest#sha256:}"
+          tags: agenticlinux:${{ matrix.variant }}
+          outputs: type=docker,dest=${{ runner.temp }}/image.tar
       - uses: actions/upload-artifact@v4
         with:
-          name: digest-${{ matrix.variant }}-${{ runner.arch }}
-          path: digests/*
-          if-no-files-found: error
+          name: image-${{ matrix.variant }}-${{ runner.arch }}
+          path: ${{ runner.temp }}/image.tar
+          compression-level: 0
+          retention-days: 1
+      - name: Load image
+        run: |
+          docker load -i "$RUNNER_TEMP/image.tar"
+          rm "$RUNNER_TEMP/image.tar"
+          docker buildx prune -af
+      - name: Install into a disk image
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          docker build -f test/Dockerfile --build-arg "IMAGE=agenticlinux:$VARIANT" -t agenticlinux:smoke .
+          truncate -s 30G disk.raw
+          docker run --rm --privileged --pid=host -v /dev:/dev \
+            -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/vm" agenticlinux:smoke \
+            bootc install to-disk --via-loopback --source-imgref docker-daemon:agenticlinux:smoke \
+            --target-imgref "$IMAGE:${VARIANT%-atomic}" --generic-image --skip-fetch-check \
+            --karg systemd.run=/usr/bin/smoke-vm --karg systemd.run_success_action=poweroff \
+            --karg systemd.run_failure_action=poweroff --karg console=ttyS0 --karg console=ttyAMA0 \
+            /vm/disk.raw
+          sudo chown "$USER" disk.raw
+      - name: Boot and smoke test
+        run: |
+          sudo apt-get install -y qemu-system-x86 qemu-system-arm qemu-utils
+          [ -e /dev/kvm ] && sudo chmod a+rw /dev/kvm
+          test/smoke.sh disk.raw
+      - if: runner.arch == 'X64'
+        run: qemu-img convert -c -O qcow2 -o compression_type=zstd disk.raw disk.qcow2
+      - if: runner.arch == 'X64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: vm-${{ matrix.variant }}
+          path: disk.qcow2
+          compression-level: 0
           retention-days: 1
 
-  manifest:
+  # Boot the x86_64 disks on the other hosts with hardware virtualization.
+  # Linux arm64, macOS arm64 and Windows arm64 runners have none.
+  smoke:
     needs: [setup, build]
-    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: ${{ fromJSON(needs.setup.outputs.variants) }}
+        runner: [macos-15-intel, windows-2025]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: vm-${{ matrix.variant }}
+      - if: runner.os == 'macOS'
+        run: brew install qemu
+      - if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          choco install -y --no-progress qemu
+          echo 'C:\Program Files\qemu' >> "$GITHUB_PATH"
+      - shell: bash
+        run: test/smoke.sh disk.qcow2 x86_64
+
+  # Everything passed: publish the images to Docker Hub.
+  push:
+    needs: [setup, build, smoke]
     strategy:
       matrix:
         variant: ${{ fromJSON(needs.setup.outputs.variants) }}
+    runs-on: ubuntu-24.04
     steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache /usr/local/.ghcup /usr/share/swift
+          docker system prune -af
       - uses: actions/download-artifact@v4
         with:
-          pattern: digest-${{ matrix.variant }}-*
-          path: digests
-          merge-multiple: true
-      - uses: docker/setup-buildx-action@v3
+          pattern: image-${{ matrix.variant }}-*
       - uses: docker/login-action@v3
         with:
           username: ${{ vars.DOCKER_HUB_USER }}
@@ -100,12 +144,34 @@ jobs:
           TAG: ${{ needs.setup.outputs.tag }}
         run: |
           name="${VARIANT%-atomic}"
-          # shellcheck disable=SC2046
+          for arch in X64:x86_64 ARM64:aarch64; do
+            docker load -i "image-$VARIANT-${arch%:*}/image.tar"
+            docker tag "agenticlinux:$VARIANT" "$IMAGE:$name-$TAG-${arch#*:}"
+            docker push "$IMAGE:$name-$TAG-${arch#*:}"
+            docker rmi "agenticlinux:$VARIANT" "$IMAGE:$name-$TAG-${arch#*:}"
+          done
           docker buildx imagetools create -t "$IMAGE:$name" -t "$IMAGE:$name-$TAG" \
-            $(printf "$IMAGE@sha256:%s " $(ls digests))
+            "$IMAGE:$name-$TAG-x86_64" "$IMAGE:$name-$TAG-aarch64"
+
+  release:
+    needs: [setup, push]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.setup.outputs.tag }}
+        run: |
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
+            --title "$TAG" --notes "Images: https://hub.docker.com/r/${{ vars.DOCKER_HUB_USER }}/agenticlinux/tags?name=$TAG
+
+          ISOs larger than 2 GiB are split; reassemble with
+          \`cat agenticlinux-<variant>-<arch>.iso.part* > agenticlinux-<variant>-<arch>.iso\`
+          and verify against the .sha256 file."
 
   iso:
-    needs: [setup, manifest]
+    needs: [setup, release]
     permissions:
       contents: write
     strategy:
@@ -128,9 +194,12 @@ jobs:
           name="${VARIANT%-atomic}"
           image="$IMAGE:$name-$TAG"
           mkdir output
+          # bootc-image-builder only reads containers-storage, so seed it with skopeo first
           docker run --rm --privileged -v ./output:/output -v /var/lib/containers/storage \
-            quay.io/centos-bootc/bootc-image-builder:latest \
-            --type anaconda-iso "$image"
+            --entrypoint sh quay.io/centos-bootc/bootc-image-builder:latest -c \
+            "mkdir -p /var/lib/containers/storage/overlay && \
+             skopeo copy docker://$image containers-storage:$image && \
+             bootc-image-builder --type anaconda-iso $image"
           iso="agenticlinux-$name-$(uname -m).iso"
           sudo mv output/bootiso/install.iso "$iso"
           sha256sum "$iso" > "$iso.sha256"
