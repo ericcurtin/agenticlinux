@@ -23,19 +23,16 @@ tests Docker, Podman, Docker Sandboxes, llmman and the agents (x86_64 and
 aarch64 on Linux runners, plus the x86_64 disks on macOS Intel and Windows
 runners). Only if everything passes are the images pushed to
 [Docker Hub](https://hub.docker.com/r/ericcurtin044/agenticlinux) and an
-installer ISO per variant and architecture published on
-[GitHub Releases](https://github.com/ericcurtin/agenticlinux/releases).
+installer ISO per variant and architecture (built by [iso/build.sh](iso/build.sh))
+published on [GitHub Releases](https://github.com/ericcurtin/agenticlinux/releases).
 Images are also tagged `<variant>-<release>` and `<variant>-<release>-<arch>`.
 
 ## Install
 
 Download the ISO for your variant and architecture from the latest release and
-boot it. ISOs over 2 GiB are split into `.partNN` files; reassemble first:
-
-```sh
-cat agenticlinux-kinoite-x86_64.iso.part* > agenticlinux-kinoite-x86_64.iso
-sha256sum -c agenticlinux-kinoite-x86_64.iso.sha256
-```
+boot it. It is Fedora's network installer preset to pull the matching image from
+Docker Hub, so the install needs a network connection; disk, user and locale are
+chosen in the installer as usual, with plain xfs partitions as the default.
 
 Or switch an existing Fedora Atomic / bootc system:
 
@@ -43,7 +40,8 @@ Or switch an existing Fedora Atomic / bootc system:
 sudo bootc switch docker.io/ericcurtin044/agenticlinux:kinoite
 ```
 
-The root filesystem (which holds `/var`, `/home` and `/root`) defaults to xfs.
+The root filesystem (which holds `/var`, `/home` and `/root`) defaults to xfs
+for both `bootc install` and the ISO.
 
 After the first boot, add yourself to the `docker` and `kvm` groups
 (Docker Sandboxes need `/dev/kvm`):

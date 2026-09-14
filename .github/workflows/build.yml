@@ -176,9 +176,8 @@ jobs:
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
             --title "$TAG" --notes "Images: https://hub.docker.com/r/${{ vars.DOCKER_HUB_USER }}/agenticlinux/tags?name=$TAG
 
-          ISOs larger than 2 GiB are split; reassemble with
-          \`cat agenticlinux-<variant>-<arch>.iso.part* > agenticlinux-<variant>-<arch>.iso\`
-          and verify against the .sha256 file."
+          The ISOs are Fedora's network installer preset to install the matching
+          image from Docker Hub, so they need a network connection during install."
 
   iso:
     needs: [setup, release]
@@ -191,33 +190,16 @@ jobs:
         runner: [ubuntu-24.04, ubuntu-24.04-arm]
     runs-on: ${{ matrix.runner }}
     steps:
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache /usr/local/.ghcup /usr/share/swift
-          docker system prune -af
-          df -h /
+      - uses: actions/checkout@v4
       - name: Build ISO
         env:
           VARIANT: ${{ matrix.variant }}
           TAG: ${{ needs.setup.outputs.tag }}
         run: |
           name="${VARIANT%-atomic}"
-          image="$IMAGE:$name-$TAG"
-          mkdir output
-          # bootc-image-builder only reads containers-storage, so seed it with skopeo first
-          docker run --rm --privileged -v ./output:/output -v /var/lib/containers/storage \
-            --entrypoint sh quay.io/centos-bootc/bootc-image-builder:latest -c \
-            "mkdir -p /var/lib/containers/storage/overlay && \
-             skopeo copy docker://$image containers-storage:$image && \
-             bootc-image-builder --type anaconda-iso $image"
           iso="agenticlinux-$name-$(uname -m).iso"
-          sudo mv output/bootiso/install.iso "$iso"
+          docker run --rm -v "$PWD:/w" -w /w fedora:${{ env.FEDORA }} iso/build.sh "$IMAGE:$name-$TAG" "/w/$iso"
           sha256sum "$iso" > "$iso.sha256"
-          # GitHub release assets are limited to 2 GiB
-          if [ "$(stat -c %s "$iso")" -gt 2000000000 ]; then
-            split -b 1900M -d "$iso" "$iso.part"
-            rm "$iso"
-          fi
       - name: Upload to release
         env:
           GH_TOKEN: ${{ github.token }}
