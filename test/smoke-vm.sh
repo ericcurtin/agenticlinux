@@ -19,12 +19,15 @@ set -eux
 # rootless podman the model mount gets an SELinux label llama.cpp cannot read.
 # Pin it instead: the image's Docker in the VM, the binary in a container. Per
 # client, since the first client to find no daemon spawns one with its env.
-as_test() { runuser -l test -c "LLMMAN_RUNTIME=$runtime $*"; }
+as_test() { runuser -l test -c "$client_env $*"; }
 if systemd-detect-virt -cq; then
-  runtime=bin
+  # llama-server inherits the daemon's environment here (in the VM llmman runs
+  # it in a container and forwards only a fixed list of variables), so the
+  # agents that send no max_tokens of their own (codex) can be bounded too
+  client_env="LLMMAN_RUNTIME=bin LLAMA_ARG_N_PREDICT=4096"
   inference=1
 else
-  runtime=docker
+  client_env=LLMMAN_RUNTIME=docker
   # The host may skip the agent turns (smoke.sh SMOKE_INFERENCE): the nested
   # HVF guests on the Intel macOS runners are 5-10x slower than KVM or WHPX.
   modprobe qemu_fw_cfg || true
@@ -43,7 +46,12 @@ for c in "sbx version" "llmman --version" "opencode --version" "codex --version"
   as_test "$c"
 done
 
-# Agents on a local model through llmman
+# Agents on a local model through llmman. A 0.8b model at default sampling now
+# and then never emits its end token and generates until the context is full,
+# hours away (seen with codex, 22k tokens in and counting when the turn hit its
+# timeout); a failed turn is retried once. The budget itself cannot be
+# tightened: a legitimate Claude Code turn takes up to 25 minutes on the arm64
+# runners, nearly all of it prompt processing of its 20k-token system prompt.
 if [ "$inference" != 0 ]; then
   as_test "llmman pull qwen3.5:0.8b"
   prompt="Reply with exactly the word OK and nothing else"
@@ -51,7 +59,8 @@ if [ "$inference" != 0 ]; then
            "claude -- -p '$prompt'" \
            "codex -- exec --skip-git-repo-check '$prompt'" \
            "openclaw -- agent --local -m '$prompt'"; do
-    as_test "timeout 1800 llmman launch ${c%% *} --model qwen3.5:0.8b ${c#* }"
+    turn="timeout 1800 llmman launch ${c%% *} --model qwen3.5:0.8b ${c#* }"
+    as_test "$turn" || as_test "$turn"
   done
 fi
 echo SMOKE PASS

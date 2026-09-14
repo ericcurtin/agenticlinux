@@ -130,7 +130,7 @@ jobs:
   # Budget: artifact download, one retried boot hang, smoke.sh's own timeout.
   smoke:
     needs: [setup, build]
-    timeout-minutes: 120
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix:
