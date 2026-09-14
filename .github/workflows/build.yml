@@ -11,9 +11,12 @@ env:
   IMAGE: docker.io/${{ vars.DOCKER_HUB_USER }}/agenticlinux
   FEDORA: 44
 
+# A newer push supersedes whatever is running: nothing is published until the
+# whole run is green, so a half-finished run of an older commit has no value,
+# and without this every push queues behind the previous run for hours.
 concurrency:
   group: build
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 # Both architectures are smoke-tested in containers; x86_64 additionally in
 # hardware-accelerated VMs. aarch64 is not boot-tested: no GitHub-hosted arm64
