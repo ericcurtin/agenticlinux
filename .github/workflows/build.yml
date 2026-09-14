@@ -15,6 +15,10 @@ concurrency:
   group: build
   cancel-in-progress: false
 
+# x86_64 only: every image is boot-tested in a hardware-accelerated VM before
+# anything is published, and no GitHub-hosted arm64 runner can run one
+# (Linux arm64 has no /dev/kvm, macOS arm64 no HVF, Windows arm64 no Hyper-V
+# VMs). aarch64 needs a self-hosted runner with KVM or HVF.
 jobs:
   setup:
     runs-on: ubuntu-24.04
@@ -27,8 +31,8 @@ jobs:
           echo "tag=$FEDORA.$(date -u +%Y%m%d).$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
           echo 'variants=["kinoite","silverblue","sway-atomic","cosmic-atomic","xfce-atomic","budgie-atomic","base-atomic"]' >> "$GITHUB_OUTPUT"
 
-  # Build each variant natively, boot it in a VM and run the smoke test.
-  # Nothing is pushed anywhere yet; the image is handed on as an artifact.
+  # Build each variant, install it into a qcow2, boot it under KVM and run the
+  # smoke test. Nothing is pushed yet; the image is handed on as an artifact.
   build:
     needs: setup
     timeout-minutes: 150
@@ -36,8 +40,7 @@ jobs:
       fail-fast: false
       matrix:
         variant: ${{ fromJSON(needs.setup.outputs.variants) }}
-        runner: [ubuntu-24.04, ubuntu-24.04-arm]
-    runs-on: ${{ matrix.runner }}
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Free disk space, use the containerd image store
@@ -47,6 +50,8 @@ jobs:
           docker system prune -af
           echo '{"features": {"containerd-snapshotter": true}}' | sudo tee /etc/docker/daemon.json
           sudo systemctl restart docker
+          sudo apt-get install -y qemu-system-x86 qemu-utils
+          sudo chmod a+rw /dev/kvm
           df -h /
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
@@ -59,13 +64,13 @@ jobs:
           outputs: type=docker,dest=${{ runner.temp }}/image.tar
       - uses: actions/upload-artifact@v4
         with:
-          name: image-${{ matrix.variant }}-${{ runner.arch }}
+          name: image-${{ matrix.variant }}
           path: ${{ runner.temp }}/image.tar
           compression-level: 0
           retention-days: 1
-      - name: Install into a disk image
-        # bootc reads the image straight from the OCI layout; the docker-daemon
-        # transport would first spool a 20 GB uncompressed tar into /var/tmp
+      - name: Install into a qcow2
+        # bootc reads the image straight from the OCI layout and writes to the
+        # qcow2 through qemu-nbd
         env:
           VARIANT: ${{ matrix.variant }}
         run: |
@@ -75,35 +80,33 @@ jobs:
           docker build -f test/Dockerfile --build-arg "IMAGE=agenticlinux:$VARIANT" -t agenticlinux:smoke .
           mkdir oci && docker save agenticlinux:smoke | tar x -C oci
           docker image rm agenticlinux:smoke "agenticlinux:$VARIANT"
-          truncate -s 60G disk.raw
-          docker run --rm --privileged --pid=host -v /dev:/dev -v "$PWD:/vm" \
+          qemu-img create -f qcow2 disk.qcow2 60G
+          sudo modprobe nbd max_part=16
+          sudo qemu-nbd --fork -c /dev/nbd0 disk.qcow2
+          docker run --rm --privileged --pid=host -v /dev:/dev -v "$PWD/oci:/oci:ro" \
             -v "$PWD/usr/lib/bootc/install:/usr/lib/bootc/install:ro" \
             quay.io/fedora/fedora-bootc:${{ env.FEDORA }} \
-            bootc install to-disk --via-loopback --source-imgref oci:/vm/oci \
+            bootc install to-disk --source-imgref oci:/oci \
             --target-imgref "$IMAGE:${VARIANT%-atomic}" --generic-image --skip-fetch-check \
             --karg systemd.run=/usr/bin/smoke-vm --karg systemd.run_success_action=poweroff \
             --karg systemd.run_failure_action=poweroff --karg console=ttyS0 --karg console=ttyAMA0 \
-            /vm/disk.raw
+            /dev/nbd0
+          sudo qemu-nbd -d /dev/nbd0
           sudo rm -rf oci
-          sudo chown "$USER" disk.raw
           df -h /
       - name: Boot and smoke test
-        run: |
-          sudo apt-get install -y qemu-system-x86 qemu-system-arm qemu-utils
-          [ -e /dev/kvm ] && sudo chmod a+rw /dev/kvm
-          test/smoke.sh disk.raw
-      - if: runner.arch == 'X64'
-        run: qemu-img convert -c -O qcow2 -o compression_type=zstd disk.raw disk.qcow2
-      - if: runner.arch == 'X64'
-        uses: actions/upload-artifact@v4
+        run: test/smoke.sh disk.qcow2
+      - run: |
+          qemu-img convert -c -O qcow2 -o compression_type=zstd disk.qcow2 vm.qcow2
+          mv vm.qcow2 disk.qcow2
+      - uses: actions/upload-artifact@v4
         with:
           name: vm-${{ matrix.variant }}
           path: disk.qcow2
           compression-level: 0
           retention-days: 1
 
-  # Boot the x86_64 disks on the other hosts with hardware virtualization.
-  # Linux arm64, macOS arm64 and Windows arm64 runners have none.
+  # Boot the same disks on the other hosts with hardware virtualization.
   smoke:
     needs: [setup, build]
     timeout-minutes: 90
@@ -144,7 +147,7 @@ jobs:
           sudo systemctl restart docker
       - uses: actions/download-artifact@v4
         with:
-          pattern: image-${{ matrix.variant }}-*
+          name: image-${{ matrix.variant }}
       - uses: docker/login-action@v3
         with:
           username: ${{ vars.DOCKER_HUB_USER }}
@@ -154,14 +157,11 @@ jobs:
           TAG: ${{ needs.setup.outputs.tag }}
         run: |
           name="${VARIANT%-atomic}"
-          for arch in X64:x86_64 ARM64:aarch64; do
-            docker load -i "image-$VARIANT-${arch%:*}/image.tar"
-            docker tag "agenticlinux:$VARIANT" "$IMAGE:$name-$TAG-${arch#*:}"
-            docker push "$IMAGE:$name-$TAG-${arch#*:}"
-            docker rmi "agenticlinux:$VARIANT" "$IMAGE:$name-$TAG-${arch#*:}"
-          done
-          docker buildx imagetools create -t "$IMAGE:$name" -t "$IMAGE:$name-$TAG" \
-            "$IMAGE:$name-$TAG-x86_64" "$IMAGE:$name-$TAG-aarch64"
+          docker load -i image.tar
+          docker tag "agenticlinux:$VARIANT" "$IMAGE:$name"
+          docker tag "agenticlinux:$VARIANT" "$IMAGE:$name-$TAG"
+          docker push "$IMAGE:$name-$TAG"
+          docker push "$IMAGE:$name"
 
   release:
     needs: [setup, push]
@@ -187,8 +187,7 @@ jobs:
       fail-fast: false
       matrix:
         variant: ${{ fromJSON(needs.setup.outputs.variants) }}
-        runner: [ubuntu-24.04, ubuntu-24.04-arm]
-    runs-on: ${{ matrix.runner }}
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Build ISO

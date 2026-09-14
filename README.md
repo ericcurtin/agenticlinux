@@ -6,7 +6,7 @@ with [Docker Engine](https://docs.docker.com/engine/),
 [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/),
 [llmman](https://github.com/llmmanorg/llmman), the `claude`, `codex`,
 `opencode` and `openclaw` agents, GPU runtimes (Vulkan, ROCm, NVIDIA/CUDA) and
-a developer toolset preinstalled. x86_64 and aarch64.
+a developer toolset preinstalled.
 
 | Variant    | Desktop       | Image                                   |
 |------------|---------------|-----------------------------------------|
@@ -21,17 +21,23 @@ a developer toolset preinstalled. x86_64 and aarch64.
 Every push to `main` builds all variants, boots each one in a VM and smoke
 tests Docker, Podman, Docker Sandboxes, llmman and the agents, including
 `llmman launch {opencode,claude,codex,openclaw} --model qwen3.5:0.8b`
-answering a prompt end to end on a local model (x86_64 and aarch64 on Linux
-runners, plus the x86_64 disks on macOS Intel and Windows runners; the
-inference part is skipped on the aarch64 runners, which have no KVM). Only if everything passes are the images pushed to
+answering a prompt end to end on a local model. Every disk is booted with
+hardware virtualization on Linux (KVM), macOS Intel (HVF) and Windows (WHPX)
+runners; there is no emulation fallback. Only if everything passes are the images pushed to
 [Docker Hub](https://hub.docker.com/r/ericcurtin044/agenticlinux) and an
-installer ISO per variant and architecture (built by [iso/build.sh](iso/build.sh))
+installer ISO per variant (built by [iso/build.sh](iso/build.sh))
 published on [GitHub Releases](https://github.com/ericcurtin/agenticlinux/releases).
-Images are also tagged `<variant>-<release>` and `<variant>-<release>-<arch>`.
+Images are also tagged `<variant>-<release>`.
+
+CI publishes x86_64 only: no GitHub-hosted arm64 runner can run a VM, so
+aarch64 images could not be boot-tested before release. Everything here is
+arch-agnostic and builds and passes the smoke test on aarch64 (tested under
+HVF on Apple silicon), so adding a self-hosted arm64 runner with KVM or HVF is
+all it takes to publish it.
 
 ## Install
 
-Download the ISO for your variant and architecture from the latest release and
+Download the ISO for your variant from the latest release and
 boot it. It is Fedora's network installer preset to pull the matching image from
 Docker Hub, so the install needs a network connection; disk, user and locale are
 chosen in the installer as usual, with plain xfs partitions as the default.
@@ -87,21 +93,24 @@ docker build --build-arg VARIANT=kinoite -t agenticlinux:kinoite .
 ## Smoke test
 
 [test/](test) holds the VM smoke test. CI layers `test/Dockerfile` (a `test`
-user and the in-guest script) on the built image, installs it to a disk with
-`bootc install to-disk` reading the OCI layout `docker save` produces, and boots
-it under qemu with `systemd.run=` pointing at the script; the result is read
-from the serial console. To run it locally:
+user and the in-guest script) on the built image, installs it into a qcow2
+with `bootc install to-disk` (reading the OCI layout `docker save` produces,
+writing through `qemu-nbd`), and boots it under qemu with `systemd.run=`
+pointing at the script; the result is read from the serial console. To run it
+locally on Linux:
 
 ```sh
 docker build -f test/Dockerfile --build-arg IMAGE=agenticlinux:kinoite -t agenticlinux:smoke .
 mkdir oci && docker save agenticlinux:smoke | tar x -C oci
-truncate -s 60G disk.raw
-docker run --rm --privileged --pid=host -v /dev:/dev -v "$PWD:/vm" \
+qemu-img create -f qcow2 disk.qcow2 60G
+sudo modprobe nbd max_part=16 && sudo qemu-nbd --fork -c /dev/nbd0 disk.qcow2
+docker run --rm --privileged --pid=host -v /dev:/dev -v "$PWD/oci:/oci:ro" \
   -v "$PWD/usr/lib/bootc/install:/usr/lib/bootc/install:ro" quay.io/fedora/fedora-bootc:44 \
-  bootc install to-disk --via-loopback --source-imgref oci:/vm/oci --generic-image --skip-fetch-check \
+  bootc install to-disk --source-imgref oci:/oci --generic-image --skip-fetch-check \
   --karg systemd.run=/usr/bin/smoke-vm --karg systemd.run_success_action=poweroff \
-  --karg systemd.run_failure_action=poweroff --karg console=ttyS0 --karg console=ttyAMA0 /vm/disk.raw
-test/smoke.sh disk.raw
+  --karg systemd.run_failure_action=poweroff --karg console=ttyS0 --karg console=ttyAMA0 /dev/nbd0
+sudo qemu-nbd -d /dev/nbd0
+test/smoke.sh disk.qcow2
 ```
 
 ## CI configuration

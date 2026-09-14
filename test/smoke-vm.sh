@@ -14,18 +14,13 @@ for c in "sbx version" "llmman --version" "opencode --version" "codex --version"
   runuser -l test -c "$c"
 done
 
-# Agents on a local model through llmman. Skipped under pure emulation
-# (arm64 CI runners have no KVM), where inference would take hours.
-modprobe qemu_fw_cfg || true
-accel=$(cat /sys/firmware/qemu_fw_cfg/by_name/opt/agenticlinux/accel/raw 2>/dev/null || echo unknown)
-if [ "$accel" != tcg ]; then
-  runuser -l test -c "llmman pull qwen3.5:0.8b"
-  prompt="Reply with exactly the word OK and nothing else"
-  for c in "opencode -- run '$prompt'" \
-           "claude -- -p '$prompt'" \
-           "codex -- exec --skip-git-repo-check '$prompt'" \
-           "openclaw -- agent --local -m '$prompt'"; do
-    runuser -l test -c "timeout 900 llmman launch ${c%% *} --model qwen3.5:0.8b ${c#* }"
-  done
-fi
+# Agents on a local model through llmman
+runuser -l test -c "llmman pull qwen3.5:0.8b"
+prompt="Reply with exactly the word OK and nothing else"
+for c in "opencode -- run '$prompt'" \
+         "claude -- -p '$prompt'" \
+         "codex -- exec --skip-git-repo-check '$prompt'" \
+         "openclaw -- agent --local -m '$prompt'"; do
+  runuser -l test -c "timeout 900 llmman launch ${c%% *} --model qwen3.5:0.8b ${c#* }"
+done
 echo SMOKE PASS
