@@ -20,6 +20,9 @@ concurrency:
 # runner can run a VM (Linux arm64 has no /dev/kvm, macOS arm64 no HVF,
 # Windows arm64 no Hyper-V VMs) and emulation is not an option. Nothing is
 # published for either architecture unless every build and test is green.
+#
+# The agent turns on a local model run in the KVM and WHPX guests only; the
+# HVF guests on the Intel macOS runners are 5-10x slower.
 jobs:
   setup:
     runs-on: ubuntu-24.04
@@ -121,9 +124,10 @@ jobs:
           retention-days: 1
 
   # Boot the same disks on the other hosts with hardware virtualization.
+  # Budget: artifact download, one retried boot hang, smoke.sh's own timeout.
   smoke:
     needs: [setup, build]
-    timeout-minutes: 90
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -143,6 +147,8 @@ jobs:
           choco install -y --no-progress qemu
           echo 'C:\Program Files\qemu' >> "$GITHUB_PATH"
       - shell: bash
+        env:
+          SMOKE_INFERENCE: ${{ runner.os != 'macOS' && '1' || '0' }}
         run: test/smoke.sh disk.qcow2 x86_64
 
   # Every build and smoke test passed: publish both architectures to Docker Hub.
