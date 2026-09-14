@@ -29,11 +29,13 @@ installer ISO per variant and architecture (built by [iso/build.sh](iso/build.sh
 published on [GitHub Releases](https://github.com/ericcurtin/agenticlinux/releases).
 Images are also tagged `<variant>-<release>` and `<variant>-<release>-<arch>`.
 
-The aarch64 images are built natively but not boot-tested in CI: no
-GitHub-hosted arm64 runner can run a VM, and the tests are never run under
-emulation. They are published together with the x86_64 images once every build
-and every x86_64 smoke test is green. The same scripts pass on aarch64 under
-HVF on Apple silicon.
+The same smoke test also runs in a plain container of every image on both
+architectures (with `llmman serve --runtime bin` and without the docker and
+podman checks, which would need nested containers). The aarch64 images are not
+boot-tested in CI: no GitHub-hosted arm64 runner can run a VM, and the tests
+are never run under emulation. They are published together with the x86_64
+images once every build and test is green; the VM test does pass on aarch64
+under HVF on Apple silicon.
 
 ## Install
 

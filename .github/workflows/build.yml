@@ -15,11 +15,11 @@ concurrency:
   group: build
   cancel-in-progress: false
 
-# The x86_64 images are boot-tested in hardware-accelerated VMs. aarch64 is
-# built natively but not boot-tested: no GitHub-hosted arm64 runner can run a
-# VM (Linux arm64 has no /dev/kvm, macOS arm64 no HVF, Windows arm64 no
-# Hyper-V VMs) and emulation is not an option. Nothing is published for either
-# architecture unless every build and every smoke test is green.
+# Both architectures are smoke-tested in containers; x86_64 additionally in
+# hardware-accelerated VMs. aarch64 is not boot-tested: no GitHub-hosted arm64
+# runner can run a VM (Linux arm64 has no /dev/kvm, macOS arm64 no HVF,
+# Windows arm64 no Hyper-V VMs) and emulation is not an option. Nothing is
+# published for either architecture unless every build and test is green.
 jobs:
   setup:
     runs-on: ubuntu-24.04
@@ -32,9 +32,9 @@ jobs:
           echo "tag=$FEDORA.$(date -u +%Y%m%d).$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
           echo 'variants=["kinoite","silverblue","sway-atomic","cosmic-atomic","xfce-atomic","budgie-atomic","base-atomic"]' >> "$GITHUB_OUTPUT"
 
-  # Build each variant natively; on x86_64 also install it into a qcow2, boot
-  # it under KVM and run the smoke test. Nothing is pushed yet; the image is
-  # handed on as an artifact.
+  # Build each variant natively and run the smoke test in a container of it;
+  # on x86_64 also install it into a qcow2 and boot it under KVM for the full
+  # test. Nothing is pushed yet; the image is handed on as an artifact.
   build:
     needs: setup
     timeout-minutes: 150
@@ -69,6 +69,15 @@ jobs:
           path: ${{ runner.temp }}/image.tar
           compression-level: 0
           retention-days: 1
+      - name: Smoke test in a container
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          docker load -i "$RUNNER_TEMP/image.tar"
+          rm "$RUNNER_TEMP/image.tar"
+          docker buildx prune -af
+          docker build -f test/Dockerfile --build-arg "IMAGE=agenticlinux:$VARIANT" -t agenticlinux:smoke .
+          docker run --rm agenticlinux:smoke smoke-vm
       - if: runner.arch == 'X64'
         run: |
           sudo apt-get install -y qemu-system-x86 qemu-utils
@@ -80,10 +89,6 @@ jobs:
         env:
           VARIANT: ${{ matrix.variant }}
         run: |
-          docker load -i "$RUNNER_TEMP/image.tar"
-          rm "$RUNNER_TEMP/image.tar"
-          docker buildx prune -af
-          docker build -f test/Dockerfile --build-arg "IMAGE=agenticlinux:$VARIANT" -t agenticlinux:smoke .
           mkdir oci && docker save agenticlinux:smoke | tar x -C oci
           docker image rm agenticlinux:smoke "agenticlinux:$VARIANT"
           qemu-img create -f qcow2 disk.qcow2 60G
