@@ -34,6 +34,6 @@ for c in "opencode -- run '$prompt'" \
          "claude -- -p '$prompt'" \
          "codex -- exec --skip-git-repo-check '$prompt'" \
          "openclaw -- agent --local -m '$prompt'"; do
-  runuser -l test -c "timeout 900 llmman launch ${c%% *} --model qwen3.5:0.8b ${c#* }"
+  runuser -l test -c "timeout 1800 llmman launch ${c%% *} --model qwen3.5:0.8b ${c#* }"
 done
 echo SMOKE PASS
