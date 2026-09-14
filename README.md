@@ -19,9 +19,11 @@ a developer toolset preinstalled. x86_64 and aarch64.
 | base       | none          | `docker.io/ericcurtin044/agenticlinux:base`       |
 
 Every push to `main` builds all variants, boots each one in a VM and smoke
-tests Docker, Podman, Docker Sandboxes, llmman and the agents (x86_64 and
-aarch64 on Linux runners, plus the x86_64 disks on macOS Intel and Windows
-runners). Only if everything passes are the images pushed to
+tests Docker, Podman, Docker Sandboxes, llmman and the agents, including
+`llmman launch {opencode,claude,codex,openclaw} --model qwen3.5:0.8b`
+answering a prompt end to end on a local model (x86_64 and aarch64 on Linux
+runners, plus the x86_64 disks on macOS Intel and Windows runners; the
+inference part is skipped on the aarch64 runners, which have no KVM). Only if everything passes are the images pushed to
 [Docker Hub](https://hub.docker.com/r/ericcurtin044/agenticlinux) and an
 installer ISO per variant and architecture (built by [iso/build.sh](iso/build.sh))
 published on [GitHub Releases](https://github.com/ericcurtin/agenticlinux/releases).
@@ -70,7 +72,8 @@ ROCm user-space libraries; the host side above is what they need.
 See [packages.txt](packages.txt) and [build.sh](build.sh). Extra
 repositories used: RPM Fusion, Docker's Fedora repo, mise's rpm repo and
 NVIDIA's container toolkit repo. Docker Sandboxes and llmman are installed
-from their GitHub releases; the agents from npm.
+from their GitHub releases; Node from nodejs.org (Fedora's links the system
+SQLite, which OpenClaw rejects) and the agents from npm.
 
 ## Build locally
 

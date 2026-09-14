@@ -14,9 +14,6 @@ mesa-vulkan-drivers
 akmods
 nvidia-container-toolkit
 
-# --- Agents (claude, codex, opencode, openclaw are npm installed in build.sh)
-nodejs-npm
-
 # --- Wayland utilities ------------------------------------------------------
 xdg-desktop-portal-gtk
 grim

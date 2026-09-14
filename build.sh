@@ -41,6 +41,13 @@ dnf -y install xorg-x11-drv-nvidia-cuda
 dnf -y remove akmod-nvidia "kernel-devel-${KVER}"
 nvidia-ctk runtime configure --runtime=docker
 
+# Upstream Node bundles its own SQLite; OpenClaw refuses the system SQLite
+# Fedora's Node links against (WAL corruption bug in 3.51.2).
+case "$(uname -m)" in x86_64) NODE_ARCH=x64 ;; aarch64) NODE_ARCH=arm64 ;; esac
+NODE=$(curl https://nodejs.org/dist/index.json |
+  python3 -c 'import sys,json; print(next(v["version"] for v in json.load(sys.stdin) if v["version"].startswith("v24") and v["lts"]))')
+curl "https://nodejs.org/dist/${NODE}/node-${NODE}-linux-${NODE_ARCH}.tar.xz" |
+  tar xJ -C /usr --strip-components=1 --exclude='*/CHANGELOG.md' --exclude='*/LICENSE' --exclude='*/README.md'
 npm install -g --prefix /usr @anthropic-ai/claude-code @openai/codex opencode-ai openclaw
 
 curl -o /usr/bin/llmman \

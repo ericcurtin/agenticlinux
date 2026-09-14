@@ -8,7 +8,7 @@ set -euo pipefail
 
 disk=$1
 arch=${2:-$(uname -m)}
-timeout=${SMOKE_TIMEOUT:-2700}
+timeout=${SMOKE_TIMEOUT:-1800}
 
 case "$arch" in
   x86_64) qemu=qemu-system-x86_64 machine=q35 ;;
@@ -31,27 +31,36 @@ for f in "$bin/../share/qemu/edk2-$arch-code.fd" "$bin/share/edk2-$arch-code.fd"
   [ -e "$f" ] && cp "$f" firmware.fd && break
 done
 
-rm -f serial.log
-# bootindex pins the disk as the firmware's boot target; without it EDK2 can
-# race virtio-blk enumeration, fall through to the EFI shell and hang.
-"$qemu" -M "$machine" -accel "$accel" -cpu "$cpu" -smp 4 -m 4G -no-reboot \
-  -display none -monitor none -serial file:serial.log \
-  -drive if=pflash,format=raw,readonly=on,file=firmware.fd \
-  -drive file="$disk",if=none,id=d0,format="${disk##*.}" \
-  -device virtio-blk-pci,drive=d0,bootindex=0 \
-  -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
-  -device virtio-rng-pci &
-pid=$!
+# A boot that reports neither PASS nor FAIL (firmware or hypervisor hang, seen
+# on the macOS runners) is retried once; a failure inside the guest is not.
+for attempt in 1 2; do
+  rm -f serial.log
+  # bootindex pins the disk as the firmware's boot target; without it EDK2 can
+  # race virtio-blk enumeration, fall through to the EFI shell and hang.
+  # fw_cfg tells the guest which accelerator it runs under (see smoke-vm.sh).
+  "$qemu" -M "$machine" -accel "$accel" -cpu "$cpu" -smp 4 -m 4G -no-reboot \
+    -display none -monitor none -serial file:serial.log \
+    -fw_cfg name=opt/agenticlinux/accel,string="${accel%%,*}" \
+    -drive if=pflash,format=raw,readonly=on,file=firmware.fd \
+    -drive file="$disk",if=none,id=d0,format="${disk##*.}" \
+    -device virtio-blk-pci,drive=d0,bootindex=0 \
+    -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
+    -device virtio-rng-pci &
+  pid=$!
 
-# Stream the guest's own output while waiting so CI logs show progress
-tail -F serial.log 2>/dev/null | grep --line-buffered -E "smoke-vm\[|SMOKE|BdsDxe" &
-tailpid=$!
-for ((t = 0; t < timeout; t += 10)); do
-  kill -0 "$pid" 2>/dev/null || break
-  sleep 10
+  # Stream the guest's own output while waiting so CI logs show progress
+  tail -F serial.log 2>/dev/null | grep --line-buffered -E "smoke-vm\[|SMOKE|BdsDxe" &
+  tailpid=$!
+  for ((t = 0; t < timeout; t += 10)); do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 10
+  done
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  kill "$tailpid" 2>/dev/null || true
+
+  grep -q "SMOKE PASS" serial.log && exit 0
+  grep -q "SMOKE FAIL" serial.log && exit 1
+  echo "attempt $attempt: no result from the guest after ${timeout}s"
 done
-kill "$pid" 2>/dev/null || true
-wait "$pid" 2>/dev/null || true
-kill "$tailpid" 2>/dev/null || true
-
-grep -q "SMOKE PASS" serial.log
+exit 1

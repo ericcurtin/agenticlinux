@@ -3,4 +3,4 @@
 ARG IMAGE
 FROM ${IMAGE}
 COPY test/smoke-vm.sh /usr/bin/smoke-vm
-RUN useradd -m test
+RUN useradd -m -G docker test
