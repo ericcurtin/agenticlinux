@@ -6,7 +6,7 @@ with [Docker Engine](https://docs.docker.com/engine/),
 [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/),
 [llmman](https://github.com/llmmanorg/llmman), the `claude`, `codex`,
 `opencode` and `openclaw` agents, GPU runtimes (Vulkan, ROCm, NVIDIA/CUDA) and
-a developer toolset preinstalled.
+a developer toolset preinstalled. x86_64 and aarch64.
 
 | Variant    | Desktop       | Image                                   |
 |------------|---------------|-----------------------------------------|
@@ -25,19 +25,19 @@ answering a prompt end to end on a local model. Every disk is booted with
 hardware virtualization on Linux (KVM), macOS Intel (HVF) and Windows (WHPX)
 runners; there is no emulation fallback. Only if everything passes are the images pushed to
 [Docker Hub](https://hub.docker.com/r/ericcurtin044/agenticlinux) and an
-installer ISO per variant (built by [iso/build.sh](iso/build.sh))
+installer ISO per variant and architecture (built by [iso/build.sh](iso/build.sh))
 published on [GitHub Releases](https://github.com/ericcurtin/agenticlinux/releases).
-Images are also tagged `<variant>-<release>`.
+Images are also tagged `<variant>-<release>` and `<variant>-<release>-<arch>`.
 
-CI publishes x86_64 only: no GitHub-hosted arm64 runner can run a VM, so
-aarch64 images could not be boot-tested before release. Everything here is
-arch-agnostic and builds and passes the smoke test on aarch64 (tested under
-HVF on Apple silicon), so adding a self-hosted arm64 runner with KVM or HVF is
-all it takes to publish it.
+The aarch64 images are built natively but not boot-tested in CI: no
+GitHub-hosted arm64 runner can run a VM, and the tests are never run under
+emulation. They are published together with the x86_64 images once every build
+and every x86_64 smoke test is green. The same scripts pass on aarch64 under
+HVF on Apple silicon.
 
 ## Install
 
-Download the ISO for your variant from the latest release and
+Download the ISO for your variant and architecture from the latest release and
 boot it. It is Fedora's network installer preset to pull the matching image from
 Docker Hub, so the install needs a network connection; disk, user and locale are
 chosen in the installer as usual, with plain xfs partitions as the default.
