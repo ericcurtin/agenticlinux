@@ -12,7 +12,8 @@ KVER=$(rpm -q kernel --qf '%{VERSION}-%{RELEASE}.%{ARCH}')
 # /root is a dangling symlink to /var/roothome during the build
 export HOME=/tmp
 
-curl() { command curl -fsSL --retry 5 --retry-all-errors "$@"; }
+# Patient retries: GitHub Releases has had multi-minute outages mid-build
+curl() { command curl -fsSL --retry 12 --retry-delay 20 --retry-all-errors "$@"; }
 
 dnf -y install dnf5-plugins \
   "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-${FEDORA}.noarch.rpm" \
@@ -21,9 +22,10 @@ dnf config-manager addrepo --from-repofile=https://download.docker.com/linux/fed
 dnf config-manager addrepo --from-repofile=https://mise.jdx.dev/rpm/mise.repo
 dnf config-manager addrepo --from-repofile=https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo
 
-# shellcheck disable=SC2046
-dnf -y install $(sed 's/#.*//' /tmp/packages.txt) "kernel-devel-${KVER}" \
+curl -o /tmp/docker-sbx.rpm \
   "https://github.com/docker/sbx-releases/releases/latest/download/DockerSandboxes-linux-${ARCH}-rockylinux8.rpm"
+# shellcheck disable=SC2046
+dnf -y install $(sed 's/#.*//' /tmp/packages.txt) "kernel-devel-${KVER}" /tmp/docker-sbx.rpm
 
 # Fedora's ROCm packages are x86_64 only
 if [ "$(uname -m)" = x86_64 ]; then
