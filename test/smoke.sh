@@ -26,7 +26,15 @@ cpu=host
 case "$(uname -s)" in
   Linux) accel=kvm; [ -w /dev/kvm ] || { echo "no usable /dev/kvm"; exit 1; } ;;
   Darwin) accel=hvf ;;
-  *) accel=whpx,kernel-irqchip=off cpu=max ;;
+  # WHPX has no "host" model, and "max" hands the guest every feature the
+  # Hyper-V partition advertises, which varies with the Azure host the runner
+  # lands on. On one such host the guest kernel's cred state was corrupted
+  # within seconds of boot (WARN in cap_bprm_creds_from_file, every init exec
+  # returned EPERM, panic) on both attempts, while the same disk booted fine
+  # on other hosts. A fixed x86-64-v3 model (AVX2/FMA for llama.cpp) keeps the
+  # guest's feature set, and the emulation paths it exercises, the same
+  # everywhere; qemu silently drops any bit a host lacks.
+  *) accel=whpx,kernel-irqchip=off cpu=Skylake-Client-noTSX-IBRS ;;
 esac
 
 # Copy the firmware next to the disk: keeps qemu's arguments free of absolute
@@ -39,8 +47,9 @@ for f in "$bin/../share/qemu/edk2-$arch-code.fd" "$bin/share/edk2-$arch-code.fd"
 done
 
 # A guest with no test output within the boot budget (firmware or hypervisor
-# hang, seen on the macOS runners) is retried once; a failure or timeout inside
-# the guest, or qemu itself failing (e.g. no accelerator), is not.
+# hang, seen on the macOS runners) or that panics before the test starts (seen
+# under WHPX) is retried once; a failure, panic or timeout inside the test, or
+# qemu itself failing (e.g. no accelerator), is not.
 for attempt in 1 2; do
   rm -f serial.log
   # bootindex pins the disk as the firmware's boot target; without it EDK2 can
@@ -56,16 +65,18 @@ for attempt in 1 2; do
   pid=$!
 
   # Stream the guest's own output while waiting so CI logs show progress
-  tail -F serial.log 2>/dev/null | grep --line-buffered -E "smoke-vm\[|SMOKE|BdsDxe" &
+  tail -F serial.log 2>/dev/null | grep --line-buffered -E "smoke-vm\[|SMOKE|BdsDxe|Kernel panic" &
   tailpid=$!
   booted=
+  panicked=
   killed=
   for ((t = 0; t < timeout; t += 10)); do
     kill -0 "$pid" 2>/dev/null || break
-    if [ -z "$booted" ]; then
-      grep -q "smoke-vm\[" serial.log 2>/dev/null && booted=1
-      [ -n "$booted" ] || [ "$t" -lt "$boot_timeout" ] || break
-    fi
+    [ -n "$booted" ] || ! grep -q "smoke-vm\[" serial.log 2>/dev/null || booted=1
+    # A panicked kernel sits there forever (panic= is unset, -no-reboot); don't
+    # wait out the budget on it
+    grep -q "Kernel panic - not syncing" serial.log 2>/dev/null && { panicked=1; break; }
+    [ -n "$booted" ] || [ "$t" -lt "$boot_timeout" ] || break
     sleep 10
   done
   kill "$pid" 2>/dev/null && killed=1
@@ -76,14 +87,17 @@ for attempt in 1 2; do
     cat qemu.log; exit "$status"
   fi
   grep -q "SMOKE PASS" serial.log && exit 0
-  # The stream above is filtered
+  # The stream above is filtered; a panic's WARN and trace need more room
   echo "--- last lines of the serial console"
-  tail -n 40 serial.log 2>/dev/null || true
+  tail -n "$([ -n "$panicked" ] && echo 100 || echo 40)" serial.log 2>/dev/null || true
   echo "---"
   grep -q "SMOKE FAIL" serial.log && exit 1
   if [ -n "$booted" ]; then
-    echo "no result from the guest after ${timeout}s"; exit 1
+    if [ -n "$panicked" ]; then echo "the guest kernel panicked during the test"
+    else echo "no result from the guest after ${timeout}s"; fi
+    exit 1
   fi
-  echo "attempt $attempt: no output from the guest after ${boot_timeout}s"
+  if [ -n "$panicked" ]; then echo "attempt $attempt: the guest kernel panicked before the test ran"
+  else echo "attempt $attempt: no output from the guest after ${boot_timeout}s"; fi
 done
 exit 1

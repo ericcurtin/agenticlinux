@@ -157,6 +157,15 @@ jobs:
         env:
           SMOKE_INFERENCE: ${{ runner.os != 'macOS' && '1' || '0' }}
         run: test/smoke.sh disk.qcow2 x86_64
+      # The step above prints only the tail of the guest's console
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-log-${{ matrix.variant }}-${{ matrix.runner }}
+          path: |
+            serial.log
+            qemu.log
+          retention-days: 7
 
   # Every build and smoke test passed: publish both architectures to Docker Hub.
   push:
