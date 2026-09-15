@@ -12,9 +12,10 @@ disk=$1
 arch=${2:-$(uname -m)}
 inference=${SMOKE_INFERENCE:-1}
 # For the whole boot and test (the agent turns alone take 17 minutes under
-# WHPX, plus up to 30 for one turn the guest times out and retries), and for
-# the guest's first test output (slowest boot seen: 4 minutes)
-timeout=${SMOKE_TIMEOUT:-5400}
+# WHPX, plus up to 30 for one turn the guest times out and the two shorter,
+# token-capped retries of it, see smoke-vm.sh), and for the guest's first test
+# output (slowest boot seen: 4 minutes)
+timeout=${SMOKE_TIMEOUT:-7200}
 boot_timeout=${SMOKE_BOOT_TIMEOUT:-900}
 
 case "$arch" in
