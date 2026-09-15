@@ -91,7 +91,11 @@ jobs:
       - if: runner.arch == 'X64'
         name: Install into a qcow2
         # bootc reads the image straight from the OCI layout and writes to the
-        # qcow2 through qemu-nbd
+        # qcow2 through qemu-nbd. no_timer_check: the kernel's IO-APIC timer
+        # sanity test wants five PIT ticks within a short delay run before the
+        # TSC is calibrated, and a loaded HVF host has missed that and panicked
+        # 16 ms into boot (the kernel skips the test itself on every hypervisor
+        # it recognizes, KVM, Hyper-V and VMware, but sees HVF as bare metal).
         env:
           VARIANT: ${{ matrix.variant }}
           BOOTC: quay.io/fedora/fedora-bootc:${{ env.FEDORA }}
@@ -111,6 +115,7 @@ jobs:
             --target-imgref "$IMAGE:${VARIANT%-atomic}" --generic-image --skip-fetch-check \
             --karg systemd.run=/usr/bin/smoke-vm --karg systemd.run_success_action=poweroff \
             --karg systemd.run_failure_action=poweroff --karg console=ttyS0 --karg console=ttyAMA0 \
+            --karg no_timer_check \
             /dev/nbd0
           sudo qemu-nbd -d /dev/nbd0
           sudo rm -rf oci
