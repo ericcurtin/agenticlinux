@@ -94,7 +94,11 @@ jobs:
         # qcow2 through qemu-nbd
         env:
           VARIANT: ${{ matrix.variant }}
+          BOOTC: quay.io/fedora/fedora-bootc:${{ env.FEDORA }}
         run: |
+          # Patient retries, as in build.sh: quay.io has answered 502 mid-pull,
+          # and docker run's own implicit pull is a single attempt
+          for i in $(seq 12); do docker pull "$BOOTC" && break || sleep 20; done
           mkdir oci && docker save agenticlinux:smoke | tar x -C oci
           docker image rm agenticlinux:smoke "agenticlinux:$VARIANT"
           qemu-img create -f qcow2 disk.qcow2 60G
@@ -102,7 +106,7 @@ jobs:
           sudo qemu-nbd --fork -c /dev/nbd0 disk.qcow2
           docker run --rm --privileged --pid=host -v /dev:/dev -v "$PWD/oci:/oci:ro" \
             -v "$PWD/usr/lib/bootc/install:/usr/lib/bootc/install:ro" \
-            quay.io/fedora/fedora-bootc:${{ env.FEDORA }} \
+            "$BOOTC" \
             bootc install to-disk --source-imgref oci:/oci \
             --target-imgref "$IMAGE:${VARIANT%-atomic}" --generic-image --skip-fetch-check \
             --karg systemd.run=/usr/bin/smoke-vm --karg systemd.run_success_action=poweroff \
@@ -224,6 +228,7 @@ jobs:
         run: |
           name="${VARIANT%-atomic}"
           iso="agenticlinux-$name-$(uname -m).iso"
+          for i in $(seq 12); do docker pull fedora:${{ env.FEDORA }} && break || sleep 20; done
           docker run --rm -v "$PWD:/w" -w /w fedora:${{ env.FEDORA }} iso/build.sh "$IMAGE:$name-$TAG" "/w/$iso"
           sha256sum "$iso" > "$iso.sha256"
       - name: Upload to release
