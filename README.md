@@ -70,7 +70,9 @@ sudo usermod -aG docker,kvm "$USER"
   image's kernel, CUDA driver libraries and `nvidia-container-toolkit`
   registered with Docker (`docker run --gpus all ...`). The module is
   unsigned, so disable Secure Boot or enroll your own MOK. nouveau is
-  blacklisted via kernel arguments.
+  blacklisted via kernel arguments. On aarch64 the driver is best effort:
+  when RPM Fusion's aarch64 build is broken the image is published without
+  it (and with nouveau), see [build.sh](build.sh).
 
 Prebuilt llama.cpp and vLLM (wheels or containers) bundle their own CUDA and
 ROCm user-space libraries; the host side above is what they need.

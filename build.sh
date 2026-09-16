@@ -35,11 +35,27 @@ fi
 
 # /usr is read-only on a bootc host, so build the NVIDIA kernel module now.
 # akmod-nvidia's %post only works in rpm-ostree's sandbox; skip it and run
-# akmods ourselves, then drop the build-time packages.
-dnf -y install --setopt=tsflags=noscripts akmod-nvidia
-akmods --force --kernels "${KVER}"
-modinfo -k "${KVER}" nvidia >/dev/null
-dnf -y install xorg-x11-drv-nvidia-cuda
+# akmods ourselves, then drop the build-time packages. akmods exits 0 on a
+# failed build, hence the modinfo check.
+#
+# On aarch64 the driver is best effort. RPM Fusion's aarch64 driver breaks in
+# ways x86_64's does not (615.71.09-3 requires a Tegra library no package
+# provides, so dnf fell back to the GA 595 driver, which no longer builds
+# against the current kernel) and an NVIDIA GPU in a Fedora aarch64 desktop is
+# rare; holding both architectures' images back for it is not worth it. The
+# image then keeps nouveau, which the kernel arguments would otherwise
+# blacklist, and says so in the build log.
+if dnf -y install --setopt=tsflags=noscripts akmod-nvidia &&
+   akmods --force --kernels "${KVER}" &&
+   modinfo -k "${KVER}" nvidia >/dev/null; then
+  dnf -y install xorg-x11-drv-nvidia-cuda
+elif [ "$(uname -m)" = aarch64 ]; then
+  tail -n 30 /var/cache/akmods/nvidia/*.failed.log || true
+  echo "WARNING: the NVIDIA driver could not be installed, building without it" >&2
+  rm /usr/lib/bootc/kargs.d/10-nvidia.toml
+else
+  exit 1
+fi
 dnf -y remove akmod-nvidia "kernel-devel-${KVER}"
 nvidia-ctk runtime configure --runtime=docker
 
