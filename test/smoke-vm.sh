@@ -17,6 +17,16 @@ set -eux
 # Every client runs with this environment, which llmman launch hands on to the
 # agent and the first client to find no daemon hands on to the daemon it spawns.
 #
+# LLMMAN_CONTEXT_LENGTH: without it the daemon asks llama-server for the
+# model's full trained context, 256k tokens for qwen3.5:0.8b, whose six
+# full-attention layers need 12 KB of KV cache per token: 3.2 GB in a guest
+# that has 4-8 GB for everything. The load then OOMs, llmman halves the
+# context and reloads, and that loop has run until llmman gave up on the
+# server ("exited before becoming ready", 24 minutes per attempt, three
+# attempts, SMOKE FAIL) on a host where the guest had a little less headroom.
+# 64k tokens is 800 MB and three times what the largest agent prompt needs
+# (Claude Code's 20k-token system prompt plus the 4096-token output cap).
+#
 # A 0.8b model at default sampling now and then never emits its end token and
 # generates until the context is full, hours away (seen with codex and with
 # Claude Code, 14-22k tokens in and counting when the turn hit its timeout).
@@ -25,7 +35,7 @@ set -eux
 # lets a request's max_tokens override its own --n-predict), OpenClaw's
 # onboarding writes maxTokens 4096 into its config, and codex sends no
 # max_tokens, so llama-server's default applies where it can be set (below).
-client_env="CLAUDE_CODE_MAX_OUTPUT_TOKENS=4096 OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX=4096"
+client_env="LLMMAN_CONTEXT_LENGTH=65536 CLAUDE_CODE_MAX_OUTPUT_TOKENS=4096 OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX=4096"
 as_test() { runuser -l test -c "$client_env $*"; }
 
 # llmman's --runtime auto falls through docker -> podman -> bin on any failure

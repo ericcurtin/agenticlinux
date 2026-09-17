@@ -70,7 +70,11 @@ for attempt in 1 2; do
   # write into it as an "invalid write on metadata (overlaps with refcount
   # block)", set the corrupt bit in the header and so killed the retry too
   # ("Image is corrupt; cannot be opened read/write").
-  "$qemu" -M "$machine" -accel "$accel" -cpu "$cpu" -smp 4 -m 4G -no-reboot \
+  #
+  # 8 GB: the guest runs docker, the llmman daemon and llama-server with the
+  # model and its KV cache (bounded in smoke-vm.sh); the smallest runner
+  # (macOS Intel) has 14 GB.
+  "$qemu" -M "$machine" -accel "$accel" -cpu "$cpu" -smp 4 -m 8G -no-reboot \
     -display none -monitor none -serial "file:$serial" \
     -fw_cfg name=opt/agenticlinux/inference,string="$inference" \
     -drive if=pflash,format=raw,readonly=on,file=firmware.fd \

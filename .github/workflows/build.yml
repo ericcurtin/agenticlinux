@@ -10,6 +10,7 @@ on:
 env:
   IMAGE: docker.io/${{ vars.DOCKER_HUB_USER }}/agenticlinux
   FEDORA: 44
+  REPO_URL: ${{ github.server_url }}/${{ github.repository }}
 
 # A newer push supersedes whatever is running: nothing is published until the
 # whole run is green, so a half-finished run of an older commit has no value,
@@ -27,16 +28,21 @@ concurrency:
 # The agent turns on a local model run in the KVM and WHPX guests only; the
 # HVF guests on the Intel macOS runners are 5-10x slower.
 jobs:
+  # The variants are named after their desktop; that is also the public tag and
+  # the ISO name. "bases" maps each onto the upstream image it is built from
+  # (Dockerfile VARIANT); build.sh has the same table for the OS identity.
   setup:
     runs-on: ubuntu-24.04
     outputs:
       tag: ${{ steps.out.outputs.tag }}
       variants: ${{ steps.out.outputs.variants }}
+      bases: ${{ steps.out.outputs.bases }}
     steps:
       - id: out
         run: |
           echo "tag=$FEDORA.$(date -u +%Y%m%d).$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
-          echo 'variants=["kinoite","silverblue","sway-atomic","cosmic-atomic","xfce-atomic","budgie-atomic","base-atomic"]' >> "$GITHUB_OUTPUT"
+          echo 'variants=["kde","gnome","sway","cosmic","xfce","budgie","base"]' >> "$GITHUB_OUTPUT"
+          echo 'bases={"kde":"kinoite","gnome":"silverblue","sway":"sway-atomic","cosmic":"cosmic-atomic","xfce":"xfce-atomic","budgie":"budgie-atomic","base":"base-atomic"}' >> "$GITHUB_OUTPUT"
 
   # Build each variant natively and run the smoke test in a container of it;
   # on x86_64 also install it into a qcow2 and boot it under KVM for the full
@@ -65,8 +71,9 @@ jobs:
         with:
           context: .
           build-args: |
-            VARIANT=${{ matrix.variant }}
+            VARIANT=${{ fromJSON(needs.setup.outputs.bases)[matrix.variant] }}
             FEDORA=${{ env.FEDORA }}
+            REPO_URL=${{ env.REPO_URL }}
           tags: agenticlinux:${{ matrix.variant }}
           outputs: type=docker,dest=${{ runner.temp }}/image.tar
       - uses: actions/upload-artifact@v4
@@ -112,7 +119,7 @@ jobs:
             -v "$PWD/usr/lib/bootc/install:/usr/lib/bootc/install:ro" \
             "$BOOTC" \
             bootc install to-disk --source-imgref oci:/oci \
-            --target-imgref "$IMAGE:${VARIANT%-atomic}" --generic-image --skip-fetch-check \
+            --target-imgref "$IMAGE:$VARIANT" --generic-image --skip-fetch-check \
             --karg systemd.run=/usr/bin/smoke-vm --karg systemd.run_success_action=poweroff \
             --karg systemd.run_failure_action=poweroff --karg console=ttyS0 --karg console=ttyAMA0 \
             --karg no_timer_check \
@@ -210,16 +217,19 @@ jobs:
           VARIANT: ${{ matrix.variant }}
           TAG: ${{ needs.setup.outputs.tag }}
         run: |
-          name="${VARIANT%-atomic}"
           for arch in X64:x86_64 ARM64:aarch64; do
             docker load -i "image-$VARIANT-${arch%:*}/image.tar"
-            docker tag "agenticlinux:$VARIANT" "$IMAGE:$name-$TAG-${arch#*:}"
-            docker push "$IMAGE:$name-$TAG-${arch#*:}"
-            docker rmi "agenticlinux:$VARIANT" "$IMAGE:$name-$TAG-${arch#*:}"
+            docker tag "agenticlinux:$VARIANT" "$IMAGE:$VARIANT-$TAG-${arch#*:}"
+            docker push "$IMAGE:$VARIANT-$TAG-${arch#*:}"
+            docker rmi "agenticlinux:$VARIANT" "$IMAGE:$VARIANT-$TAG-${arch#*:}"
           done
-          docker buildx imagetools create -t "$IMAGE:$name" -t "$IMAGE:$name-$TAG" \
-            "$IMAGE:$name-$TAG-x86_64" "$IMAGE:$name-$TAG-aarch64"
+          docker buildx imagetools create -t "$IMAGE:$VARIANT" -t "$IMAGE:$VARIANT-$TAG" \
+            "$IMAGE:$VARIANT-$TAG-x86_64" "$IMAGE:$VARIANT-$TAG-aarch64"
 
+  # GitHub Releases answers 500 now and then (an ISO upload has failed with
+  # "Error saving asset" after 15 minutes of transfer, on eight of fourteen
+  # ISOs in one run), so every call to it below is retried. The retries are
+  # idempotent: create checks for the release first, upload clobbers.
   release:
     needs: [setup, push]
     runs-on: ubuntu-24.04
@@ -229,12 +239,23 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.setup.outputs.tag }}
-        run: |
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
-            --title "$TAG" --notes "Images: https://hub.docker.com/r/${{ vars.DOCKER_HUB_USER }}/agenticlinux/tags?name=$TAG
+          NOTES: |
+            Images: https://hub.docker.com/r/${{ vars.DOCKER_HUB_USER }}/agenticlinux/tags?name=${{ needs.setup.outputs.tag }}
 
-          The ISOs are Fedora's network installer preset to install the matching
-          image from Docker Hub, so they need a network connection during install."
+            The ISOs are network installers that install the matching image from
+            Docker Hub, so they need a network connection during install.
+
+            AgenticLinux is an independent community build. It is not affiliated
+            with, endorsed by or supported by the Fedora Project or Red Hat, Inc.
+            Fedora is a trademark of Red Hat, Inc.
+        run: |
+          for i in $(seq 5); do
+            gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && break
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
+              --title "$TAG" --notes "$NOTES" && break
+            [ "$i" -lt 5 ] || exit 1
+            sleep 60
+          done
 
   iso:
     needs: [setup, release]
@@ -253,16 +274,21 @@ jobs:
           VARIANT: ${{ matrix.variant }}
           TAG: ${{ needs.setup.outputs.tag }}
         run: |
-          name="${VARIANT%-atomic}"
-          iso="agenticlinux-$name-$(uname -m).iso"
+          iso="agenticlinux-$VARIANT-$(uname -m).iso"
           for i in $(seq 12); do docker pull fedora:${{ env.FEDORA }} && break || sleep 20; done
-          docker run --rm -v "$PWD:/w" -w /w fedora:${{ env.FEDORA }} iso/build.sh "$IMAGE:$name-$TAG" "/w/$iso"
+          docker run --rm -v "$PWD:/w" -w /w -e REPO_URL fedora:${{ env.FEDORA }} \
+            iso/build.sh "$IMAGE:$VARIANT-$TAG" "$VARIANT" "/w/$iso"
           sha256sum "$iso" > "$iso.sha256"
       - name: Upload to release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.setup.outputs.tag }}
-        run: gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" agenticlinux-*
+        run: |
+          for i in $(seq 5); do
+            gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber agenticlinux-* && break
+            [ "$i" -lt 5 ] || exit 1
+            sleep 60
+          done
 
   publish:
     needs: [setup, iso]
@@ -273,4 +299,9 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.setup.outputs.tag }}
-        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+        run: |
+          for i in $(seq 5); do
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest && break
+            [ "$i" -lt 5 ] || exit 1
+            sleep 60
+          done
