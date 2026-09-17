@@ -1,22 +1,25 @@
-# agenticlinux
+<img src="https://github.com/ericcurtin/agenticlinux/releases/download/assets/agenticlinux-logo-256.png" alt="AgenticLinux" width="128" align="right">
 
-Fedora 44 [bootc](https://bootc-dev.github.io/bootc/) desktops built on
-[fedora-ostree-desktops](https://quay.io/organization/fedora-ostree-desktops)
-with [Docker Engine](https://docs.docker.com/engine/),
+# AgenticLinux
+
+A [bootc](https://bootc-dev.github.io/bootc/) desktop for working with coding
+agents: [Docker Engine](https://docs.docker.com/engine/),
 [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/),
 [llmman](https://github.com/llmmanorg/llmman), the `claude`, `codex`,
 `opencode` and `openclaw` agents, GPU runtimes (Vulkan, ROCm, NVIDIA/CUDA) and
-a developer toolset preinstalled. x86_64 and aarch64.
+a developer toolset preinstalled. Built from Fedora 44's packages on the
+[fedora-ostree-desktops](https://quay.io/organization/fedora-ostree-desktops)
+images. x86_64 and aarch64.
 
-| Variant    | Desktop       | Image                                   |
-|------------|---------------|-----------------------------------------|
-| kinoite    | KDE Plasma    | `docker.io/ericcurtin044/agenticlinux:kinoite`    |
-| silverblue | GNOME         | `docker.io/ericcurtin044/agenticlinux:silverblue` |
-| sway       | Sway          | `docker.io/ericcurtin044/agenticlinux:sway`       |
-| cosmic     | COSMIC        | `docker.io/ericcurtin044/agenticlinux:cosmic`     |
-| xfce       | Xfce          | `docker.io/ericcurtin044/agenticlinux:xfce`       |
-| budgie     | Budgie        | `docker.io/ericcurtin044/agenticlinux:budgie`     |
-| base       | none          | `docker.io/ericcurtin044/agenticlinux:base`       |
+| Variant | Desktop    | Image                                         |
+|---------|------------|-----------------------------------------------|
+| kde     | KDE Plasma | `docker.io/ericcurtin044/agenticlinux:kde`    |
+| gnome   | GNOME      | `docker.io/ericcurtin044/agenticlinux:gnome`  |
+| sway    | Sway       | `docker.io/ericcurtin044/agenticlinux:sway`   |
+| cosmic  | COSMIC     | `docker.io/ericcurtin044/agenticlinux:cosmic` |
+| xfce    | Xfce       | `docker.io/ericcurtin044/agenticlinux:xfce`   |
+| budgie  | Budgie     | `docker.io/ericcurtin044/agenticlinux:budgie` |
+| base    | none       | `docker.io/ericcurtin044/agenticlinux:base`   |
 
 Every push to `main` builds all variants, boots each one in a VM and smoke
 tests Docker, Podman, Docker Sandboxes, llmman and the agents, including
@@ -40,14 +43,14 @@ under HVF on Apple silicon.
 ## Install
 
 Download the ISO for your variant and architecture from the latest release and
-boot it. It is Fedora's network installer preset to pull the matching image from
+boot it. It is a network installer preset to pull the matching image from
 Docker Hub, so the install needs a network connection; disk, user and locale are
 chosen in the installer as usual, with plain xfs partitions as the default.
 
-Or switch an existing Fedora Atomic / bootc system:
+Or switch an existing bootc system:
 
 ```sh
-sudo bootc switch docker.io/ericcurtin044/agenticlinux:kinoite
+sudo bootc switch docker.io/ericcurtin044/agenticlinux:kde
 ```
 
 The root filesystem (which holds `/var`, `/home` and `/root`) defaults to xfs
@@ -88,11 +91,14 @@ SQLite, which OpenClaw rejects) and the agents from npm.
 ## Build locally
 
 ```sh
-docker build --build-arg VARIANT=kinoite -t agenticlinux:kinoite .
+docker build --build-arg VARIANT=kinoite -t agenticlinux:kde .
 ```
 
-`VARIANT` is the fedora-ostree-desktops image name: `kinoite`, `silverblue`,
-`sway-atomic`, `cosmic-atomic`, `xfce-atomic`, `budgie-atomic`, `base-atomic`.
+`VARIANT` is the fedora-ostree-desktops image the variant is built from:
+`kinoite` (kde), `silverblue` (gnome), `sway-atomic`, `cosmic-atomic`,
+`xfce-atomic`, `budgie-atomic`, `base-atomic`. `REPO_URL` (default: this
+repository) is where the OS identity files point and where the logo is
+downloaded from.
 
 ## Smoke test
 
@@ -104,7 +110,7 @@ pointing at the script; the result is read from the serial console. To run it
 locally on Linux:
 
 ```sh
-docker build -f test/Dockerfile --build-arg IMAGE=agenticlinux:kinoite -t agenticlinux:smoke .
+docker build -f test/Dockerfile --build-arg IMAGE=agenticlinux:kde -t agenticlinux:smoke .
 mkdir oci && docker save agenticlinux:smoke | tar x -C oci
 qemu-img create -f qcow2 disk.qcow2 60G
 sudo modprobe nbd max_part=16 && sudo qemu-nbd --fork -c /dev/nbd0 disk.qcow2
@@ -121,3 +127,25 @@ test/smoke.sh disk.qcow2
 
 The workflow expects the repository variable `DOCKER_HUB_USER` and secret
 `DOCKER_HUB_PAT` (Docker Hub username and access token).
+
+## Logo and artwork
+
+The logo lives in the [`assets` release](https://github.com/ericcurtin/agenticlinux/releases/tag/assets),
+not in git; [build.sh](build.sh) and [iso/build.sh](iso/build.sh) download it
+from there. Fedora's trademarked artwork is replaced in the images by
+Fedora's own unbranded `generic-logos`, and the installer ISOs are relabelled,
+see [build.sh](build.sh) and [iso/build.sh](iso/build.sh).
+
+## Trademarks and disclaimer
+
+AgenticLinux is an independent community project. It is not affiliated with,
+endorsed by or supported by the Fedora Project or Red Hat, Inc. Fedora and the
+Fedora logo are trademarks of Red Hat, Inc. Docker is a trademark of Docker,
+Inc. KDE, GNOME, Sway, COSMIC, Xfce, Budgie, NVIDIA, CUDA, AMD, ROCm and all
+other names are the trademarks of their respective owners and are used here
+only to identify the software included.
+
+The images are provided as is, without warranty of any kind; see
+[LICENSE](LICENSE). Each included package remains under its own license and
+its own authors' terms, including the proprietary NVIDIA driver from RPM
+Fusion and the agents installed from npm.

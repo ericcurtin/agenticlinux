@@ -1,10 +1,23 @@
 #!/bin/bash
-# Runs inside the image build; see Dockerfile.
+# Runs inside the image build; see Dockerfile. VARIANT and REPO_URL come from
+# the build arguments.
 set -euxo pipefail
 
 case "$(uname -m)" in
   x86_64) ARCH=amd64 ;;
   aarch64) ARCH=arm64 ;;
+esac
+
+# What each upstream image becomes; the workflow has the same table
+case "$VARIANT" in
+  kinoite)       VARIANT_ID=kde    DESKTOP="KDE Plasma" ;;
+  silverblue)    VARIANT_ID=gnome  DESKTOP=GNOME ;;
+  sway-atomic)   VARIANT_ID=sway   DESKTOP=Sway ;;
+  cosmic-atomic) VARIANT_ID=cosmic DESKTOP=COSMIC ;;
+  xfce-atomic)   VARIANT_ID=xfce   DESKTOP=Xfce ;;
+  budgie-atomic) VARIANT_ID=budgie DESKTOP=Budgie ;;
+  base-atomic)   VARIANT_ID=base   DESKTOP="no desktop" ;;
+  *) echo "unknown VARIANT '$VARIANT'" >&2; exit 1 ;;
 esac
 
 FEDORA=$(rpm -E %fedora)
@@ -72,6 +85,85 @@ curl -o /usr/bin/llmman \
   "https://github.com/llmmanorg/llmman/releases/latest/download/llmman-$(uname -m)-unknown-linux-gnu"
 chmod 755 /usr/bin/llmman
 /usr/bin/llmman --version
+
+# --- Identity ---------------------------------------------------------------
+# This is a remix built from Fedora's packages, not Fedora: Fedora's trademark
+# guidelines allow the former but not presenting a modified distribution under
+# Fedora's name and logo. Fedora ships generic-logos for exactly this, an
+# unbranded drop-in for its artwork package (same file names and provides, so
+# nothing that wants a system logo breaks). Its release identity files are
+# plain text and are overwritten below; the fedora-release packages themselves
+# stay, many packages require them by name. Done after every dnf transaction
+# so no package update can put the originals back.
+if rpm -q fedora-logos >/dev/null; then
+  dnf -y swap fedora-logos generic-logos
+fi
+# Fedora's first-run app and its Fedora-logo icon theme override, where present
+for p in plasma-welcome-fedora breeze-icon-theme-fedora; do
+  if rpm -q "$p" >/dev/null; then dnf -y remove "$p"; fi
+done
+
+# The logo is not in git; it is a release asset of the repository
+mkdir -p /tmp/logo
+sizes="16 22 24 32 48 64 128 256 512"
+files=agenticlinux-logo.svg
+for s in $sizes; do files="$files agenticlinux-logo-$s.png"; done
+for f in $files; do
+  curl -o "/tmp/logo/$f" "${REPO_URL}/releases/download/assets/$f"
+done
+install -Dm644 /tmp/logo/agenticlinux-logo.svg /usr/share/icons/hicolor/scalable/apps/agenticlinux.svg
+for s in $sizes; do
+  install -Dm644 "/tmp/logo/agenticlinux-logo-$s.png" "/usr/share/icons/hicolor/${s}x${s}/apps/agenticlinux.png"
+done
+install -Dm644 /tmp/logo/agenticlinux-logo.svg /usr/share/pixmaps/agenticlinux-logo.svg
+install -Dm644 /tmp/logo/agenticlinux-logo-256.png /usr/share/pixmaps/agenticlinux-logo.png
+# GTK trusts an icon cache that is newer than its directory, so refresh it
+if command -v gtk-update-icon-cache >/dev/null; then
+  gtk-update-icon-cache -f -t -q /usr/share/icons/hicolor
+else
+  touch /usr/share/icons/hicolor
+fi
+
+# GNOME's background-logo extension is preset to fedora-logos' files
+schemas=/usr/share/glib-2.0/schemas
+if [ -e "$schemas/org.fedorahosted.background-logo-extension.gschema.xml" ]; then
+  cat > "$schemas/zz-agenticlinux-background-logo.gschema.override" <<EOF
+[org.fedorahosted.background-logo-extension]
+logo-file='/usr/share/pixmaps/agenticlinux-logo.svg'
+logo-file-dark='/usr/share/pixmaps/agenticlinux-logo.svg'
+EOF
+  glib-compile-schemas "$schemas"
+fi
+
+# The boot splash's watermark was fedora-logos' too, and it is baked into the
+# initramfs, so that is rebuilt the way rpm-ostree builds it for these images
+# (their dracut.conf.d already says hostonly=no).
+if [ -d /usr/share/plymouth/themes/spinner ]; then
+  install -m644 /tmp/logo/agenticlinux-logo-64.png /usr/share/plymouth/themes/spinner/watermark.png
+  dracut --no-hostonly --kver "$KVER" --reproducible --add ostree --tmpdir /tmp -f /tmp/initramfs.img
+  install -m600 /tmp/initramfs.img "/usr/lib/modules/$KVER/initramfs.img"
+fi
+
+cat > /usr/lib/os-release <<EOF
+NAME="AgenticLinux"
+VERSION="${FEDORA} (${DESKTOP})"
+ID=agenticlinux
+ID_LIKE=fedora
+VERSION_ID=${FEDORA}
+PRETTY_NAME="AgenticLinux ${FEDORA} (${DESKTOP})"
+ANSI_COLOR="0;38;2;124;108;248"
+LOGO=agenticlinux
+CPE_NAME="cpe:/o:agenticlinux:agenticlinux:${FEDORA}"
+DEFAULT_HOSTNAME="agenticlinux"
+HOME_URL="${REPO_URL}"
+DOCUMENTATION_URL="${REPO_URL}#readme"
+SUPPORT_URL="${REPO_URL}/issues"
+BUG_REPORT_URL="${REPO_URL}/issues"
+VARIANT="${DESKTOP}"
+VARIANT_ID=${VARIANT_ID}
+EOF
+# /etc/system-release, /etc/redhat-release and /etc/fedora-release link here
+echo "AgenticLinux release ${FEDORA}" > /usr/lib/fedora-release
 
 systemctl enable docker.service
 
