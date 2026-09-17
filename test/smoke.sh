@@ -2,7 +2,8 @@
 # Boot a smoke-test qcow2 (built from test/Dockerfile with bootc install) under
 # qemu with hardware virtualization and wait for the in-guest smoke-vm to
 # report over the serial console. Linux (KVM), macOS (HVF) and Windows Git
-# Bash (WHPX); there is deliberately no emulation fallback.
+# Bash (WHPX); there is deliberately no emulation fallback. The disk is not
+# modified: the guest writes to a throwaway overlay.
 #
 # Usage: test/smoke.sh disk.qcow2 [x86_64|aarch64]
 # SMOKE_INFERENCE=0 has the guest skip the agent turns (see smoke-vm.sh).
@@ -51,32 +52,49 @@ done
 # hang, seen on the macOS runners) or that panics before the test starts (seen
 # under WHPX) is retried once; a failure, panic or timeout inside the test, or
 # qemu itself failing (e.g. no accelerator), is not.
+#
+# Each attempt's console and qemu stderr are kept (serial.N.log, qemu.N.log)
+# so a retried first attempt can still be read from CI's artifact.
 for attempt in 1 2; do
-  rm -f serial.log
+  serial=serial.$attempt.log
+  qemu_log=qemu.$attempt.log
+  rm -f "$serial" "$qemu_log"
   # bootindex pins the disk as the firmware's boot target; without it EDK2 can
   # race virtio-blk enumeration, fall through to the EFI shell and hang.
+  #
+  # snapshot=on opens the disk read-only and sends the guest's writes to a
+  # throwaway overlay: every attempt boots the same disk, and the tested image
+  # is the one that is handed on. It also keeps qemu from ever writing into
+  # the zstd-compressed image: on the macOS runners (and only there, the same
+  # disks boot on Windows) qemu 11.1 has refused the firmware's very first
+  # write into it as an "invalid write on metadata (overlaps with refcount
+  # block)", set the corrupt bit in the header and so killed the retry too
+  # ("Image is corrupt; cannot be opened read/write").
   "$qemu" -M "$machine" -accel "$accel" -cpu "$cpu" -smp 4 -m 4G -no-reboot \
-    -display none -monitor none -serial file:serial.log \
+    -display none -monitor none -serial "file:$serial" \
     -fw_cfg name=opt/agenticlinux/inference,string="$inference" \
     -drive if=pflash,format=raw,readonly=on,file=firmware.fd \
-    -drive file="$disk",if=none,id=d0,format=qcow2 \
+    -drive file="$disk",if=none,id=d0,format=qcow2,snapshot=on \
     -device virtio-blk-pci,drive=d0,bootindex=0 \
     -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
-    -device virtio-rng-pci 2> qemu.log &
+    -device virtio-rng-pci 2> "$qemu_log" &
   pid=$!
 
   # Stream the guest's own output while waiting so CI logs show progress
-  tail -F serial.log 2>/dev/null | grep --line-buffered -E "smoke-vm\[|SMOKE|BdsDxe|Kernel panic" &
+  tail -F "$serial" 2>/dev/null | grep --line-buffered -E "smoke-vm\[|SMOKE|BdsDxe|Kernel panic" &
   tailpid=$!
   booted=
   panicked=
+  shell=
   killed=
   for ((t = 0; t < timeout; t += 10)); do
     kill -0 "$pid" 2>/dev/null || break
-    [ -n "$booted" ] || ! grep -q "smoke-vm\[" serial.log 2>/dev/null || booted=1
+    [ -n "$booted" ] || ! grep -q "smoke-vm\[" "$serial" 2>/dev/null || booted=1
     # A panicked kernel sits there forever (panic= is unset, -no-reboot); don't
     # wait out the budget on it
-    grep -q "Kernel panic - not syncing" serial.log 2>/dev/null && { panicked=1; break; }
+    grep -q "Kernel panic - not syncing" "$serial" 2>/dev/null && { panicked=1; break; }
+    # Nor on a firmware that gave up on the disk and dropped to its shell
+    [ -n "$booted" ] || ! grep -q "Shell> " "$serial" 2>/dev/null || { shell=1; break; }
     [ -n "$booted" ] || [ "$t" -lt "$boot_timeout" ] || break
     sleep 10
   done
@@ -85,20 +103,26 @@ for attempt in 1 2; do
   kill "$tailpid" 2>/dev/null || true
 
   if [ -z "$killed" ] && [ "$status" -ne 0 ]; then
-    cat qemu.log; exit "$status"
+    cat "$qemu_log"; exit "$status"
   fi
-  grep -q "SMOKE PASS" serial.log && exit 0
+  grep -q "SMOKE PASS" "$serial" && exit 0
   # The stream above is filtered; a panic's WARN and trace need more room
   echo "--- last lines of the serial console"
-  tail -n "$([ -n "$panicked" ] && echo 100 || echo 40)" serial.log 2>/dev/null || true
+  tail -n "$([ -n "$panicked" ] && echo 100 || echo 40)" "$serial" 2>/dev/null || true
   echo "---"
-  grep -q "SMOKE FAIL" serial.log && exit 1
+  # qemu's own complaints (a refused disk write, an accelerator warning),
+  # minus its note about the kill above
+  if grep -qv "terminating on signal" "$qemu_log" 2>/dev/null; then
+    echo "--- qemu"; grep -v "terminating on signal" "$qemu_log"; echo "---"
+  fi
+  grep -q "SMOKE FAIL" "$serial" && exit 1
   if [ -n "$booted" ]; then
     if [ -n "$panicked" ]; then echo "the guest kernel panicked during the test"
     else echo "no result from the guest after ${timeout}s"; fi
     exit 1
   fi
   if [ -n "$panicked" ]; then echo "attempt $attempt: the guest kernel panicked before the test ran"
+  elif [ -n "$shell" ]; then echo "attempt $attempt: the firmware fell through to the EFI shell"
   else echo "attempt $attempt: no output from the guest after ${boot_timeout}s"; fi
 done
 exit 1

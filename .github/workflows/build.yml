@@ -123,15 +123,21 @@ jobs:
       - if: runner.arch == 'X64'
         name: Boot and smoke test
         run: test/smoke.sh disk.qcow2
+      # The guest wrote to an overlay, so this is the disk as installed, the
+      # one the test just booted. The checksum lets the smoke jobs tell a
+      # damaged download from a boot failure (10 GB per disk).
       - if: runner.arch == 'X64'
         run: |
           qemu-img convert -c -O qcow2 -o compression_type=zstd disk.qcow2 vm.qcow2
           mv vm.qcow2 disk.qcow2
+          sha256sum disk.qcow2 > disk.qcow2.sha256
       - if: runner.arch == 'X64'
         uses: actions/upload-artifact@v4
         with:
           name: vm-${{ matrix.variant }}
-          path: disk.qcow2
+          path: |
+            disk.qcow2
+            disk.qcow2.sha256
           compression-level: 0
           retention-days: 1
 
@@ -151,6 +157,12 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: vm-${{ matrix.variant }}
+      - name: Verify the disk arrived intact
+        shell: bash
+        # macOS has no sha256sum; its shasum reads the same file format
+        run: |
+          if command -v sha256sum >/dev/null; then sha256sum -c disk.qcow2.sha256
+          else shasum -a 256 -c disk.qcow2.sha256; fi
       - if: runner.os == 'macOS'
         run: brew install qemu
       - if: runner.os == 'Windows'
@@ -162,14 +174,15 @@ jobs:
         env:
           SMOKE_INFERENCE: ${{ runner.os != 'macOS' && '1' || '0' }}
         run: test/smoke.sh disk.qcow2 x86_64
-      # The step above prints only the tail of the guest's console
+      # The step above prints only the tail of the guest's console; smoke.sh
+      # keeps one console and one qemu stderr log per boot attempt
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: smoke-log-${{ matrix.variant }}-${{ matrix.runner }}
           path: |
-            serial.log
-            qemu.log
+            serial.*.log
+            qemu.*.log
           retention-days: 7
 
   # Every build and smoke test passed: publish both architectures to Docker Hub.
