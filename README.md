@@ -4,14 +4,19 @@
 
 <h1 align="center">AgenticLinux</h1>
 
-A [bootc](https://bootc-dev.github.io/bootc/) desktop for working with coding
-agents: [Docker Engine](https://docs.docker.com/engine/),
-[Docker Sandboxes](https://docs.docker.com/ai/sandboxes/),
-[llmman](https://github.com/llmmanorg/llmman), the `claude`, `codex`,
-`opencode` and `openclaw` agents, GPU runtimes (Vulkan, ROCm, NVIDIA/CUDA) and
-a developer toolset preinstalled. Built from Fedora 44's packages on the
+A Linux desktop built for working with coding agents. Boot it and start
+coding: `claude`, `codex`, `opencode` and `openclaw` are already installed,
+along with [llmman](https://github.com/llmmanorg/llmman) for running models
+locally, [Docker Engine](https://docs.docker.com/engine/) and
+[Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) for running agents
+in isolation, GPU runtimes for Vulkan, ROCm and NVIDIA/CUDA, and a full
+developer toolset.
+
+AgenticLinux is a [bootc](https://bootc-dev.github.io/bootc/) image: the whole
+OS ships as a container, so updates are atomic and rollback is one command.
+It is built from Fedora 44 packages on the
 [fedora-ostree-desktops](https://quay.io/organization/fedora-ostree-desktops)
-images. x86_64 and aarch64.
+images and available for x86_64 and aarch64.
 
 | Variant | Desktop    | Image                                         |
 |---------|------------|-----------------------------------------------|
