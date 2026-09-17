@@ -23,10 +23,20 @@ ostreecontainer --url=${image} --transport=registry --no-signature-verification
 reboot
 KS
 
-# Anaconda auto-applies /images/updates.img from the media: use it to make
-# plain xfs partitions the default, matching bootc install to-disk.
+# Anaconda auto-applies /images/updates.img from the media: use it to make a
+# single plain xfs root the default, matching bootc install to-disk. The stock
+# layout adds a /home partition; with PLAIN that is a real GPT partition typed
+# "Linux home", which systemd-gpt-auto-generator then tries to mount at /home
+# (a symlink on ostree) in addition to anaconda's /var/home entry. That mount
+# fails and drops the first boot into emergency mode.
 mkdir -p updates/etc/anaconda/conf.d images
-printf '[Storage]\nfile_system_type = xfs\ndefault_scheme = PLAIN\n' > updates/etc/anaconda/conf.d/99-agenticlinux.conf
+cat > updates/etc/anaconda/conf.d/99-agenticlinux.conf <<CONF
+[Storage]
+file_system_type = xfs
+default_scheme = PLAIN
+default_partitioning =
+    / (min 1 GiB)
+CONF
 (cd updates && find . | cpio -o -H newc --quiet | gzip) > images/updates.img
 
 mkksiso --skip-mkefiboot --ks agenticlinux.ks -a images netinst.iso "$out"
