@@ -1,6 +1,8 @@
-<img src="https://github.com/ericcurtin/agenticlinux/releases/download/assets/agenticlinux-logo-256.png" alt="AgenticLinux" width="128" align="right">
+<p align="center">
+  <img src="https://github.com/ericcurtin/agenticlinux/releases/download/assets/agenticlinux-logo-256.png" alt="AgenticLinux logo" width="160">
+</p>
 
-# AgenticLinux
+<h1 align="center">AgenticLinux</h1>
 
 A [bootc](https://bootc-dev.github.io/bootc/) desktop for working with coding
 agents: [Docker Engine](https://docs.docker.com/engine/),
@@ -79,73 +81,3 @@ sudo usermod -aG docker,kvm "$USER"
 
 Prebuilt llama.cpp and vLLM (wheels or containers) bundle their own CUDA and
 ROCm user-space libraries; the host side above is what they need.
-
-## What's inside
-
-See [packages.txt](packages.txt) and [build.sh](build.sh). Extra
-repositories used: RPM Fusion, Docker's Fedora repo, mise's rpm repo and
-NVIDIA's container toolkit repo. Docker Sandboxes and llmman are installed
-from their GitHub releases; Node from nodejs.org (Fedora's links the system
-SQLite, which OpenClaw rejects) and the agents from npm.
-
-## Build locally
-
-```sh
-docker build --build-arg VARIANT=kinoite -t agenticlinux:kde .
-```
-
-`VARIANT` is the fedora-ostree-desktops image the variant is built from:
-`kinoite` (kde), `silverblue` (gnome), `sway-atomic`, `cosmic-atomic`,
-`xfce-atomic`, `budgie-atomic`, `base-atomic`. `REPO_URL` (default: this
-repository) is where the OS identity files point and where the logo is
-downloaded from.
-
-## Smoke test
-
-[test/](test) holds the VM smoke test. CI layers `test/Dockerfile` (a `test`
-user and the in-guest script) on the built image, installs it into a qcow2
-with `bootc install to-disk` (reading the OCI layout `docker save` produces,
-writing through `qemu-nbd`), and boots it under qemu with `systemd.run=`
-pointing at the script; the result is read from the serial console. To run it
-locally on Linux:
-
-```sh
-docker build -f test/Dockerfile --build-arg IMAGE=agenticlinux:kde -t agenticlinux:smoke .
-mkdir oci && docker save agenticlinux:smoke | tar x -C oci
-qemu-img create -f qcow2 disk.qcow2 60G
-sudo modprobe nbd max_part=16 && sudo qemu-nbd --fork -c /dev/nbd0 disk.qcow2
-docker run --rm --privileged --pid=host -v /dev:/dev -v "$PWD/oci:/oci:ro" \
-  -v "$PWD/usr/lib/bootc/install:/usr/lib/bootc/install:ro" quay.io/fedora/fedora-bootc:44 \
-  bootc install to-disk --source-imgref oci:/oci --generic-image --skip-fetch-check \
-  --karg systemd.run=/usr/bin/smoke-vm --karg systemd.run_success_action=poweroff \
-  --karg systemd.run_failure_action=poweroff --karg console=ttyS0 --karg console=ttyAMA0 /dev/nbd0
-sudo qemu-nbd -d /dev/nbd0
-test/smoke.sh disk.qcow2
-```
-
-## CI configuration
-
-The workflow expects the repository variable `DOCKER_HUB_USER` and secret
-`DOCKER_HUB_PAT` (Docker Hub username and access token).
-
-## Logo and artwork
-
-The logo lives in the [`assets` release](https://github.com/ericcurtin/agenticlinux/releases/tag/assets),
-not in git; [build.sh](build.sh) and [iso/build.sh](iso/build.sh) download it
-from there. Fedora's trademarked artwork is replaced in the images by
-Fedora's own unbranded `generic-logos`, and the installer ISOs are relabelled,
-see [build.sh](build.sh) and [iso/build.sh](iso/build.sh).
-
-## Trademarks and disclaimer
-
-AgenticLinux is an independent community project. It is not affiliated with,
-endorsed by or supported by the Fedora Project or Red Hat, Inc. Fedora and the
-Fedora logo are trademarks of Red Hat, Inc. Docker is a trademark of Docker,
-Inc. KDE, GNOME, Sway, COSMIC, Xfce, Budgie, NVIDIA, CUDA, AMD, ROCm and all
-other names are the trademarks of their respective owners and are used here
-only to identify the software included.
-
-The images are provided as is, without warranty of any kind; see
-[LICENSE](LICENSE). Each included package remains under its own license and
-its own authors' terms, including the proprietary NVIDIA driver from RPM
-Fusion and the agents installed from npm.
