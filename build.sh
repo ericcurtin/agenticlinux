@@ -27,6 +27,19 @@ export HOME=/tmp
 
 # Patient retries: GitHub Releases has had multi-minute outages mid-build
 curl() { command curl -fsSL --retry 12 --retry-delay 20 --retry-all-errors "$@"; }
+# And dnf the same. Its own retries are immediate and per mirror, so a stall
+# on a single-host repository (nvidia.github.io fed one package at under 1000
+# bytes/s for 30 s, four times in a row) fails the transaction. Nothing is
+# installed until every package has downloaded, so re-running is safe.
+dnf() {
+  local i
+  for i in $(seq 12); do
+    command dnf "$@" && return
+    [ "$i" -lt 12 ] || return 1
+    echo "dnf failed, retrying in 20 s ($i/12)" >&2
+    sleep 20
+  done
+}
 
 dnf -y install dnf5-plugins \
   "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-${FEDORA}.noarch.rpm" \
