@@ -220,7 +220,7 @@ EOF
   "KPlugin": {
     "Id": "AgenticLinux",
     "Name": "AgenticLinux",
-    "License": "MIT"
+    "License": "Apache-2.0"
   }
 }
 EOF
