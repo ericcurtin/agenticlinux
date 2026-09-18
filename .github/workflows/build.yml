@@ -284,10 +284,6 @@ jobs:
 
             The ISOs are network installers that install the matching image from
             Docker Hub, so they need a network connection during install.
-
-            AgenticLinux is an independent community build. It is not affiliated
-            with, endorsed by or supported by the Fedora Project or Red Hat, Inc.
-            Fedora is a trademark of Red Hat, Inc.
         run: |
           for i in $(seq 5); do
             gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && break
