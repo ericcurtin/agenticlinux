@@ -19,7 +19,7 @@ It is built from Fedora 44 packages on the
 images and available for x86_64 and aarch64.
 
 <p align="center">
-  <img src="https://github.com/ericcurtin/agenticlinux/releases/download/assets/agenticlinux-screenshot-kde.png" alt="AgenticLinux KDE Plasma desktop with the agents and tools listed in a terminal" width="900">
+  <img src="https://github.com/ericcurtin/agenticlinux/releases/download/assets/agenticlinux-screenshot-kde.png" alt="AgenticLinux KDE Plasma desktop running OpenClaw on a local model through llmman" width="900">
 </p>
 
 ## Quick start
