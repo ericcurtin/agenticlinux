@@ -74,13 +74,20 @@ for attempt in 1 2; do
   # 8 GB: the guest runs docker, the llmman daemon and llama-server with the
   # model and its KV cache (bounded in smoke-vm.sh); the smallest runner
   # (macOS Intel) has 14 GB.
+  #
+  # ipv6=off: user-mode networking gives the guest an IPv6 address and router
+  # by default, but the runners have no IPv6 route out, so a registry that
+  # resolves to an AAAA record first has the guest dialing it until the
+  # timeout ("dial tcp [2600:...]:443: i/o timeout" from llmman pull on a
+  # Windows runner) instead of failing fast and moving on to IPv4. With no
+  # IPv6 on the link the guest only ever dials IPv4.
   "$qemu" -M "$machine" -accel "$accel" -cpu "$cpu" -smp 4 -m 8G -no-reboot \
     -display none -monitor none -serial "file:$serial" \
     -fw_cfg name=opt/agenticlinux/inference,string="$inference" \
     -drive if=pflash,format=raw,readonly=on,file=firmware.fd \
     -drive file="$disk",if=none,id=d0,format=qcow2,snapshot=on \
     -device virtio-blk-pci,drive=d0,bootindex=0 \
-    -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
+    -netdev user,id=n0,ipv6=off -device virtio-net-pci,netdev=n0 \
     -device virtio-rng-pci 2> "$qemu_log" &
   pid=$!
 

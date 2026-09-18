@@ -199,6 +199,9 @@ jobs:
         variant: ${{ fromJSON(needs.setup.outputs.variants) }}
         runner: [macos-15-intel, windows-2025]
     runs-on: ${{ matrix.runner }}
+    permissions:
+      actions: read
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -206,10 +209,26 @@ jobs:
           name: vm-${{ matrix.variant }}
       - name: Verify the disk arrived intact
         shell: bash
-        # macOS has no sha256sum; its shasum reads the same file format
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VARIANT: ${{ matrix.variant }}
+        # download-artifact has returned success having written nothing (an
+        # 8.7 GB artifact on a macOS runner: "Starting download", then the
+        # step ended), so the download is checked and redone with gh when it
+        # did not arrive. macOS has no sha256sum; shasum reads the same format.
         run: |
-          if command -v sha256sum >/dev/null; then sha256sum -c disk.qcow2.sha256
-          else shasum -a 256 -c disk.qcow2.sha256; fi
+          verify() {
+            [ -e disk.qcow2.sha256 ] || return 1
+            if command -v sha256sum >/dev/null; then sha256sum -c disk.qcow2.sha256
+            else shasum -a 256 -c disk.qcow2.sha256; fi
+          }
+          for i in 1 2 3; do
+            verify && exit 0
+            echo "attempt $i: the disk did not arrive intact, downloading it again"
+            rm -f disk.qcow2 disk.qcow2.sha256
+            gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" -n "vm-$VARIANT" || true
+          done
+          verify
       - if: runner.os == 'macOS'
         run: brew install qemu
       - if: runner.os == 'Windows'

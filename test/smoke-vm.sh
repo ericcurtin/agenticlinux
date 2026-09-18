@@ -77,7 +77,10 @@ done
 # the arm64 runners, nearly all of it prompt processing of its 20k-token
 # system prompt.
 if [ "$inference" != 0 ]; then
-  as_test "llmman pull qwen3.5:0.8b"
+  # Three tries, as for the agents' turns below: the pull is a chain of
+  # registry requests through the host's network and has timed out on one
+  as_test "llmman pull qwen3.5:0.8b" || as_test "llmman pull qwen3.5:0.8b" ||
+    as_test "llmman pull qwen3.5:0.8b"
   prompt="Reply with exactly the word OK and nothing else"
   for c in "opencode -- run '$prompt'" \
            "claude -- -p '$prompt'" \
