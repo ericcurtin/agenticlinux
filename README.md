@@ -4,19 +4,41 @@
 
 <h1 align="center">AgenticLinux</h1>
 
-A Linux desktop built for working with coding agents. Boot it and start
-coding: `claude`, `codex`, `opencode` and `openclaw` are already installed,
-along with [llmman](https://github.com/llmmanorg/llmman) for running models
-locally, [Docker Engine](https://docs.docker.com/engine/) and
-[Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) for running agents
-in isolation, GPU runtimes for Vulkan, ROCm and NVIDIA/CUDA, and a full
-developer toolset.
+A Linux desktop built for working with AI agents. Everything is there on
+first boot: the `claude`, `codex`, `opencode` and `openclaw` agents,
+[llmman](https://github.com/llmmanorg/llmman) to run models locally or connect
+any agent to any provider, [Docker Engine](https://docs.docker.com/engine/) and
+[Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) to run agents in
+isolation, GPU runtimes for Vulkan, ROCm and NVIDIA/CUDA, and a full developer
+toolset.
 
 AgenticLinux is a [bootc](https://bootc-dev.github.io/bootc/) image: the whole
 OS ships as a container, so updates are atomic and rollback is one command.
 It is built from Fedora 44 packages on the
 [fedora-ostree-desktops](https://quay.io/organization/fedora-ostree-desktops)
 images and available for x86_64 and aarch64.
+
+<p align="center">
+  <img src="https://github.com/ericcurtin/agenticlinux/releases/download/assets/agenticlinux-screenshot-kde.png" alt="AgenticLinux KDE Plasma desktop with the agents and tools listed in a terminal" width="900">
+</p>
+
+## Quick start
+
+1. Download the ISO for your desktop and architecture from the
+   [latest release](https://github.com/ericcurtin/agenticlinux/releases/latest),
+   boot it and install as usual.
+2. Add yourself to the `docker` and `kvm` groups, then log out and back in:
+
+   ```sh
+   sudo usermod -aG docker,kvm "$USER"
+   ```
+
+3. Run an agent on a local model, or on any hosted provider:
+
+   ```sh
+   llmman launch claude --model qwen3.8
+   llmman launch opencode --provider openrouter --model qwen/qwen3-coder
+   ```
 
 | Variant | Desktop    | Image                                         |
 |---------|------------|-----------------------------------------------|
@@ -28,30 +50,10 @@ images and available for x86_64 and aarch64.
 | budgie  | Budgie     | `docker.io/ericcurtin044/agenticlinux:budgie` |
 | base    | none       | `docker.io/ericcurtin044/agenticlinux:base`   |
 
-Every push to `main` builds all variants, boots each one in a VM and smoke
-tests Docker, Podman, Docker Sandboxes, llmman and the agents, including
-`llmman launch {opencode,claude,codex,openclaw} --model qwen3.5:0.8b`
-answering a prompt end to end on a local model. Every disk is booted with
-hardware virtualization on Linux (KVM), macOS Intel (HVF) and Windows (WHPX)
-runners; there is no emulation fallback. Only if everything passes are the images pushed to
-[Docker Hub](https://hub.docker.com/r/ericcurtin044/agenticlinux) and an
-installer ISO per variant and architecture (built by [iso/build.sh](iso/build.sh))
-published on [GitHub Releases](https://github.com/ericcurtin/agenticlinux/releases).
-Images are also tagged `<variant>-<release>` and `<variant>-<release>-<arch>`.
-
-The same smoke test also runs in a plain container of every image on both
-architectures (with `llmman serve --runtime bin` and without the docker and
-podman checks, which would need nested containers). The aarch64 images are not
-boot-tested in CI: no GitHub-hosted arm64 runner can run a VM, and the tests
-are never run under emulation. They are published together with the x86_64
-images once every build and test is green; the VM test does pass on aarch64
-under HVF on Apple silicon.
-
 ## Install
 
-Download the ISO for your variant and architecture from the latest release and
-boot it. It is a network installer preset to pull the matching image from
-Docker Hub, so the install needs a network connection; disk, user and locale are
+The ISO is a network installer preset to pull the matching image from Docker
+Hub, so the install needs a network connection; disk, user and locale are
 chosen in the installer as usual, with plain xfs partitions as the default.
 
 Or switch an existing bootc system:
@@ -61,14 +63,8 @@ sudo bootc switch docker.io/ericcurtin044/agenticlinux:kde
 ```
 
 The root filesystem (which holds `/var`, `/home` and `/root`) defaults to xfs
-for both `bootc install` and the ISO.
-
-After the first boot, add yourself to the `docker` and `kvm` groups
-(Docker Sandboxes need `/dev/kvm`):
-
-```sh
-sudo usermod -aG docker,kvm "$USER"
-```
+for both `bootc install` and the ISO. The `kvm` group from the quick start is
+what lets Docker Sandboxes open `/dev/kvm`.
 
 ## GPUs
 
@@ -83,6 +79,3 @@ sudo usermod -aG docker,kvm "$USER"
   blacklisted via kernel arguments. On aarch64 the driver is best effort:
   when RPM Fusion's aarch64 build is broken the image is published without
   it (and with nouveau), see [build.sh](build.sh).
-
-Prebuilt llama.cpp and vLLM (wheels or containers) bundle their own CUDA and
-ROCm user-space libraries; the host side above is what they need.
