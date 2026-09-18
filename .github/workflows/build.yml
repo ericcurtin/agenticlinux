@@ -92,8 +92,19 @@ jobs:
           docker build -f test/Dockerfile --build-arg "IMAGE=agenticlinux:$VARIANT" -t agenticlinux:smoke .
           docker run --rm agenticlinux:smoke smoke-vm
       - if: runner.arch == 'X64'
+        # The runner image's package lists are as old as the image, and the
+        # mirror drops a .deb as soon as noble-updates replaces it, so an
+        # install against those lists has 404'd (every x86_64 job of one run,
+        # on qemu's gstreamer Recommends). Refresh the lists first; skip the
+        # Recommends, which are audio and GUI, so only what the tests use is
+        # fetched: qemu, its tools and the OVMF firmware smoke.sh boots with.
         run: |
-          sudo apt-get install -y qemu-system-x86 qemu-utils
+          for i in 1 2 3; do
+            sudo apt-get update &&
+              sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils ovmf && break
+            [ "$i" -lt 3 ] || exit 1
+            sleep 30
+          done
           sudo chmod a+rw /dev/kvm
       - if: runner.arch == 'X64'
         name: Install into a qcow2
