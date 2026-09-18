@@ -24,15 +24,6 @@ images and available for x86_64 and aarch64.
   </a>
 </p>
 
-<p align="center">
-  OpenClaw on AgenticLinux KDE: a health check, then it finds and enables
-  bootc's update timer, then it prunes Docker.
-  <a href="https://github.com/ericcurtin/ericcurtin.github.io/releases/download/assets/openclaw-web.mp4">Watch the video</a>
-  (<a href="https://github.com/ericcurtin/ericcurtin.github.io/releases/download/assets/openclaw-web.webm">webm</a>),
-  or read the
-  <a href="https://ericcurtin.github.io/2026/09/18/announcing-agenticlinux/">announcement</a>.
-</p>
-
 ## Quick start
 
 1. Download the ISO for your desktop and architecture from the
