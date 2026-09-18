@@ -107,24 +107,53 @@ jobs:
           VARIANT: ${{ matrix.variant }}
           BOOTC: quay.io/fedora/fedora-bootc:${{ env.FEDORA }}
         run: |
+          mkdir oci && docker save agenticlinux:smoke | tar x -C oci
+          # The image is in the artifact and in oci now. Everything Docker
+          # still holds (the loaded image, its unpacked snapshots, the smoke
+          # build's cache) shares the disk with the qcow2, which grows by the
+          # whole installed system as bootc writes it through qemu-nbd.
+          docker system prune -af
+          df -h /
           # Patient retries, as in build.sh: quay.io has answered 502 mid-pull,
           # and docker run's own implicit pull is a single attempt
           for i in $(seq 12); do docker pull "$BOOTC" && break || sleep 20; done
-          mkdir oci && docker save agenticlinux:smoke | tar x -C oci
-          docker image rm agenticlinux:smoke "agenticlinux:$VARIANT"
-          qemu-img create -f qcow2 disk.qcow2 60G
           sudo modprobe nbd max_part=16
-          sudo qemu-nbd --fork -c /dev/nbd0 disk.qcow2
-          docker run --rm --privileged --pid=host -v /dev:/dev -v "$PWD/oci:/oci:ro" \
-            -v "$PWD/usr/lib/bootc/install:/usr/lib/bootc/install:ro" \
-            "$BOOTC" \
-            bootc install to-disk --source-imgref oci:/oci \
-            --target-imgref "$IMAGE:$VARIANT" --generic-image --skip-fetch-check \
-            --karg systemd.run=/usr/bin/smoke-vm --karg systemd.run_success_action=poweroff \
-            --karg systemd.run_failure_action=poweroff --karg console=ttyS0 --karg console=ttyAMA0 \
-            --karg no_timer_check \
-            /dev/nbd0
-          sudo qemu-nbd -d /dev/nbd0
+          install_disk() {
+            qemu-img create -f qcow2 disk.qcow2 60G
+            sudo qemu-nbd --fork -c /dev/nbd0 disk.qcow2
+            local status=0
+            docker run --rm --privileged --pid=host -v /dev:/dev -v "$PWD/oci:/oci:ro" \
+              -v "$PWD/usr/lib/bootc/install:/usr/lib/bootc/install:ro" \
+              "$BOOTC" \
+              bootc install to-disk --source-imgref oci:/oci \
+              --target-imgref "$IMAGE:$VARIANT" --generic-image --skip-fetch-check \
+              --karg systemd.run=/usr/bin/smoke-vm --karg systemd.run_success_action=poweroff \
+              --karg systemd.run_failure_action=poweroff --karg console=ttyS0 --karg console=ttyAMA0 \
+              --karg no_timer_check \
+              /dev/nbd0 || status=$?
+            if [ "$status" -ne 0 ]; then
+              # What the failure looked like from each side of the nbd
+              # device: the host's disk, the kernel's view of nbd and xfs,
+              # and how full the target filesystem actually was
+              df -h /
+              sudo dmesg | grep -iE 'nbd|xfs|i/o error' | tail -n 30 || true
+              sudo mkdir -p /mnt/target
+              sudo mount -o ro,norecovery /dev/nbd0p3 /mnt/target && df -h /mnt/target &&
+                sudo umount /mnt/target || true
+            fi
+            sudo qemu-nbd -d /dev/nbd0
+            return "$status"
+          }
+          # The install has failed with "No space left on device" from the
+          # target filesystem four minutes in, for an image that installs
+          # into well under half of the 60 GB disk, while the same step passed
+          # for larger variants in the same run and for the same variant in
+          # the runs around it. Nothing about it is deterministic, so a failed
+          # install is retried once on a fresh disk after the diagnostics.
+          if ! install_disk; then
+            rm -f disk.qcow2
+            install_disk
+          fi
           sudo rm -rf oci
           df -h /
       - if: runner.arch == 'X64'

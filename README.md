@@ -19,7 +19,18 @@ It is built from Fedora 44 packages on the
 images and available for x86_64 and aarch64.
 
 <p align="center">
-  <img src="https://github.com/ericcurtin/agenticlinux/releases/download/assets/agenticlinux-screenshot-kde.png" alt="AgenticLinux KDE Plasma desktop with OpenClaw's web UI answering a question using Claude Sonnet" width="900">
+  <a href="https://github.com/ericcurtin/ericcurtin.github.io/releases/download/assets/openclaw-web.mp4">
+    <img src="https://github.com/ericcurtin/ericcurtin.github.io/releases/download/assets/openclaw-web.webp" alt="OpenClaw's web Control UI on the AgenticLinux KDE desktop, asked to check the machine's health, turn on automatic OS updates and reclaim Docker disk (click for the video)" width="900">
+  </a>
+</p>
+
+<p align="center">
+  OpenClaw on AgenticLinux KDE: a health check, then it finds and enables
+  bootc's update timer, then it prunes Docker.
+  <a href="https://github.com/ericcurtin/ericcurtin.github.io/releases/download/assets/openclaw-web.mp4">Watch the video</a>
+  (<a href="https://github.com/ericcurtin/ericcurtin.github.io/releases/download/assets/openclaw-web.webm">webm</a>),
+  or read the
+  <a href="https://ericcurtin.github.io/2026/09/18/announcing-agenticlinux/">announcement</a>.
 </p>
 
 ## Quick start

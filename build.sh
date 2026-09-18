@@ -117,6 +117,22 @@ for s in $sizes; do
 done
 install -Dm644 /tmp/logo/agenticlinux-logo.svg /usr/share/pixmaps/agenticlinux-logo.svg
 install -Dm644 /tmp/logo/agenticlinux-logo-256.png /usr/share/pixmaps/agenticlinux-logo.png
+
+# generic-logos keeps fedora-logos' file names but fills them with placeholder
+# art (a dancing hot dog), and those names are what the desktops ask for:
+# Plasma's launcher icon is "start-here" (kde-settings), the system logo icon
+# is "fedora-logo-icon", anaconda and the login greeters read the pixmaps.
+# Put the AgenticLinux logo behind every one of those names.
+if rpm -q generic-logos >/dev/null; then
+  for f in $(rpm -ql generic-logos | grep -E '/(fedora-logo|start-here|system-logo)[^/]*\.(png|svg)$'); do
+    [ -L "$f" ] && continue
+    case "$f" in
+      *.svg) install -m644 /tmp/logo/agenticlinux-logo.svg "$f" ;;
+      *-small.png) install -m644 /tmp/logo/agenticlinux-logo-128.png "$f" ;;
+      *.png) install -m644 /tmp/logo/agenticlinux-logo-256.png "$f" ;;
+    esac
+  done
+fi
 # GTK trusts an icon cache that is newer than its directory, so refresh it
 if command -v gtk-update-icon-cache >/dev/null; then
   gtk-update-icon-cache -f -t -q /usr/share/icons/hicolor
@@ -134,6 +150,93 @@ logo-file-dark='/usr/share/pixmaps/agenticlinux-logo.svg'
 EOF
   glib-compile-schemas "$schemas"
 fi
+
+# --- Wallpaper --------------------------------------------------------------
+# The default wallpaper is Fedora's release artwork, wired up by the
+# desktop-backgrounds packages: gsettings overrides for GNOME and Budgie,
+# /usr/share/wallpapers/Default for Plasma (its look-and-feel and lock screen
+# are preset to it), and /usr/share/backgrounds/default*.jxl for Sway, Xfce,
+# COSMIC and the greeters. Render the AgenticLinux wallpaper and point each
+# of those at it. The renderers are build-time only. The compat links keep
+# their names (Fedora's are JPEG XL), so the image is encoded as both.
+bg=/usr/share/backgrounds/agenticlinux
+compat=$(ls /usr/share/backgrounds/default.* /usr/share/backgrounds/default-dark.* \
+            /usr/share/backgrounds/images/default*.* 2>/dev/null || true)
+if [ -n "$compat" ] || [ -d /usr/share/wallpapers ] ||
+   [ -e "$schemas/org.gnome.desktop.background.gschema.xml" ]; then
+  tools=""
+  for p in librsvg2-tools libjxl-utils; do rpm -q "$p" >/dev/null || tools="$tools $p"; done
+  # shellcheck disable=SC2086
+  [ -z "$tools" ] || dnf -y install $tools
+  install -m644 /tmp/logo/agenticlinux-logo.svg "$bg/agenticlinux-logo.svg"
+  rsvg-convert -w 3840 -h 2160 -o "$bg/agenticlinux.png" "$bg/agenticlinux.svg"
+  cjxl -d 0 --quiet "$bg/agenticlinux.png" "$bg/agenticlinux.jxl"
+  # shellcheck disable=SC2086
+  [ -z "$tools" ] || dnf -y remove $tools
+
+  for f in $compat; do
+    case "$f" in
+      *.jxl) ln -sf "$bg/agenticlinux.jxl" "$f" ;;
+      *.png) ln -sf "$bg/agenticlinux.png" "$f" ;;
+    esac
+  done
+  if [ -L /usr/share/backgrounds/default.xml ] || [ -e /usr/share/backgrounds/default.xml ]; then
+    cat > "$bg/agenticlinux.xml" <<EOF
+<background>
+  <static>
+    <duration>86400.0</duration>
+    <file>$bg/agenticlinux.jxl</file>
+  </static>
+</background>
+EOF
+    ln -sf "$bg/agenticlinux.xml" /usr/share/backgrounds/default.xml
+  fi
+
+  if [ -e "$schemas/org.gnome.desktop.background.gschema.xml" ]; then
+    cat > "$schemas/zz-agenticlinux-background.gschema.override" <<EOF
+[org.gnome.desktop.background]
+picture-uri='file://$bg/agenticlinux.jxl'
+picture-uri-dark='file://$bg/agenticlinux.jxl'
+
+[org.gnome.desktop.screensaver]
+picture-uri='file://$bg/agenticlinux.jxl'
+EOF
+    if [ -e "$schemas/x.dm.slick-greeter.gschema.xml" ]; then
+      cat >> "$schemas/zz-agenticlinux-background.gschema.override" <<EOF
+
+[x.dm.slick-greeter]
+background='$bg/agenticlinux.jxl'
+EOF
+    fi
+    glib-compile-schemas "$schemas"
+  fi
+
+  if [ -d /usr/share/wallpapers ]; then
+    install -d /usr/share/wallpapers/AgenticLinux/contents/images
+    ln -sf "$bg/agenticlinux.png" /usr/share/wallpapers/AgenticLinux/contents/images/3840x2160.png
+    ln -sf "$bg/agenticlinux.png" /usr/share/wallpapers/AgenticLinux/contents/screenshot.png
+    cat > /usr/share/wallpapers/AgenticLinux/metadata.json <<EOF
+{
+  "KPlugin": {
+    "Id": "AgenticLinux",
+    "Name": "AgenticLinux",
+    "License": "MIT"
+  }
+}
+EOF
+    if [ -L /usr/share/wallpapers/Default ]; then
+      ln -sfn AgenticLinux /usr/share/wallpapers/Default
+    fi
+  fi
+fi
+
+# Fedora's Plasma look-and-feel stays (kde-settings and the Plasma defaults
+# name it); only what it shows changes: its wallpaper above, its name here
+for f in /usr/share/plasma/look-and-feel/org.fedoraproject.fedora*.desktop/metadata.json; do
+  [ -e "$f" ] || continue
+  sed -i -e 's/"Name": "Fedora/"Name": "AgenticLinux/' \
+         -e 's/"Description": "[^"]*"/"Description": "AgenticLinux theme"/' "$f"
+done
 
 # The boot splash's watermark was fedora-logos' too, and it is baked into the
 # initramfs, so that is rebuilt the way rpm-ostree builds it for these images

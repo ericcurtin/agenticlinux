@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AgenticLinux default wallpaper: the logo on a dark gradient. build.sh
+  renders it to PNG and JPEG XL at build time; agenticlinux-logo.svg is the
+  release asset it installs next to this file.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="3840" height="2160" viewBox="0 0 3840 2160">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B1024"/>
+      <stop offset="0.55" stop-color="#121736"/>
+      <stop offset="1" stop-color="#0E1E3A"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#7C6CF8" stop-opacity="0.55"/>
+      <stop offset="0.5" stop-color="#2BC4D9" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#2BC4D9" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="3840" height="2160" fill="url(#sky)"/>
+  <ellipse cx="1920" cy="1060" rx="1500" ry="900" fill="url(#halo)"/>
+  <image xlink:href="agenticlinux-logo.svg" x="1600" y="720" width="640" height="640"/>
+</svg>
