@@ -5,7 +5,9 @@
 <h1 align="center">AgenticLinux</h1>
 
 A Linux desktop built for working with AI agents. Everything is there on
-first boot: the `claude`, `codex`, `opencode` and `openclaw` agents,
+first boot: the `claude`, `codex`, `opencode` and `openclaw` agents and the
+[ChatGPT](https://learn.chatgpt.com/docs/app) (with Codex) and
+[OpenCode](https://opencode.ai) desktop apps,
 [llmman](https://github.com/llmmanorg/llmman) to run models locally or connect
 any agent to any provider, [Docker Engine](https://docs.docker.com/engine/) and
 [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) to run agents in
@@ -16,7 +18,9 @@ AgenticLinux is a [bootc](https://bootc-dev.github.io/bootc/) image: the whole
 OS ships as a container, so updates are atomic and rollback is one command.
 It is built from Fedora 44 packages on the
 [fedora-ostree-desktops](https://quay.io/organization/fedora-ostree-desktops)
-images and available for x86_64 and aarch64.
+images, or from CentOS Stream 10 packages (with EPEL) on the
+[centos-bootc](https://quay.io/repository/centos-bootc/centos-bootc) image,
+and available for x86_64 and aarch64.
 
 <p align="center">
   <a href="https://github.com/ericcurtin/ericcurtin.github.io/releases/download/assets/openclaw-web.mp4">
@@ -42,15 +46,36 @@ images and available for x86_64 and aarch64.
    llmman launch opencode --provider openrouter --model qwen/qwen3-coder
    ```
 
-| Variant | Desktop    | Image                                         |
-|---------|------------|-----------------------------------------------|
-| kde     | KDE Plasma | `docker.io/ericcurtin044/agenticlinux:kde`    |
-| gnome   | GNOME      | `docker.io/ericcurtin044/agenticlinux:gnome`  |
-| sway    | Sway       | `docker.io/ericcurtin044/agenticlinux:sway`   |
-| cosmic  | COSMIC     | `docker.io/ericcurtin044/agenticlinux:cosmic` |
-| xfce    | Xfce       | `docker.io/ericcurtin044/agenticlinux:xfce`   |
-| budgie  | Budgie     | `docker.io/ericcurtin044/agenticlinux:budgie` |
-| base    | none       | `docker.io/ericcurtin044/agenticlinux:base`   |
+| Variant      | Built from       | Desktop    | Image                                               |
+|--------------|------------------|------------|-----------------------------------------------------|
+| kde          | Fedora 44        | KDE Plasma | `docker.io/ericcurtin044/agenticlinux:kde`          |
+| gnome        | Fedora 44        | GNOME      | `docker.io/ericcurtin044/agenticlinux:gnome`        |
+| sway         | Fedora 44        | Sway       | `docker.io/ericcurtin044/agenticlinux:sway`         |
+| cosmic       | Fedora 44        | COSMIC     | `docker.io/ericcurtin044/agenticlinux:cosmic`       |
+| xfce         | Fedora 44        | Xfce       | `docker.io/ericcurtin044/agenticlinux:xfce`         |
+| budgie       | Fedora 44        | Budgie     | `docker.io/ericcurtin044/agenticlinux:budgie`       |
+| base         | Fedora 44        | none       | `docker.io/ericcurtin044/agenticlinux:base`         |
+| centos-kde   | CentOS Stream 10 | KDE Plasma | `docker.io/ericcurtin044/agenticlinux:centos-kde`   |
+| centos-gnome | CentOS Stream 10 | GNOME      | `docker.io/ericcurtin044/agenticlinux:centos-gnome` |
+| centos-base  | CentOS Stream 10 | none       | `docker.io/ericcurtin044/agenticlinux:centos-base`  |
+
+The variants carry the same packages on both distributions, so the list is
+what CentOS Stream 10, EPEL 10 and RPM Fusion have: GNOME and KDE Plasma are
+the desktops that exist there. CentOS Stream's kernel tracks the next RHEL
+10 minor release.
+
+## Desktop apps
+
+The desktop apps of the agents that publish an RPM are installed from it,
+and start from the applications menu or as `chatgpt` and `opencode-desktop`:
+
+- **ChatGPT**: OpenAI's one desktop app, which is also the Codex app (the
+  "Codex" mode inside it). Its Linux build is a preview.
+- **OpenCode**: relocated from `/opt` to `/usr/lib` so it is part of the
+  image rather than of the machine's first install.
+
+The apps live in the read-only `/usr`, so nothing in them can update itself
+in place: they are updated with the image, like everything else.
 
 ## Install
 
@@ -74,10 +99,13 @@ what lets Docker Sandboxes open `/dev/kvm`.
 - ROCm (x86_64): HIP runtime, OpenCL, rocBLAS, hipBLAS, hipBLASLt, RCCL,
   `rocminfo`, `rocm-smi`. Containers get GPU access with
   `--device /dev/kfd --device /dev/dri`.
+- ROCm on CentOS Stream is EPEL's build: HIP, rocBLAS, hipBLAS, hipBLASLt,
+  RCCL, `rocminfo`, `rocm-smi`; EPEL has no ROCm OpenCL.
 - NVIDIA: the RPM Fusion driver with the kernel module prebuilt for the
   image's kernel, CUDA driver libraries and `nvidia-container-toolkit`
   registered with Docker (`docker run --gpus all ...`). The module is
   unsigned, so disable Secure Boot or enroll your own MOK. nouveau is
-  blacklisted via kernel arguments. On aarch64 the driver is best effort:
+  blacklisted via kernel arguments. On CentOS Stream the driver is RPM
+  Fusion's EL10 build, the 580 series. On aarch64 the driver is best effort:
   when RPM Fusion's aarch64 build is broken the image is published without
   it (and with nouveau), see [build.sh](build.sh).

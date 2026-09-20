@@ -4,24 +4,45 @@
 set -euxo pipefail
 
 case "$(uname -m)" in
-  x86_64) ARCH=amd64 ;;
-  aarch64) ARCH=arm64 ;;
+  x86_64)  ARCH=amd64 NODE_ARCH=x64 ;;
+  aarch64) ARCH=arm64 NODE_ARCH=arm64 ;;
 esac
 
-# What each upstream image becomes; the workflow has the same table
+# The base image sets the distribution, the variant the desktop; the workflow
+# has the same table. os-release is read in a subshell: it sets VARIANT too.
+read -r DISTRO RELEASE PLATFORM < <(. /usr/lib/os-release; echo "$ID $VERSION_ID ${PLATFORM_ID:-}")
 case "$VARIANT" in
-  kinoite)       VARIANT_ID=kde    DESKTOP="KDE Plasma" ;;
-  silverblue)    VARIANT_ID=gnome  DESKTOP=GNOME ;;
-  sway-atomic)   VARIANT_ID=sway   DESKTOP=Sway ;;
-  cosmic-atomic) VARIANT_ID=cosmic DESKTOP=COSMIC ;;
-  xfce-atomic)   VARIANT_ID=xfce   DESKTOP=Xfce ;;
-  budgie-atomic) VARIANT_ID=budgie DESKTOP=Budgie ;;
-  base-atomic)   VARIANT_ID=base   DESKTOP="no desktop" ;;
+  kde|centos-kde)     DESKTOP="KDE Plasma" ;;
+  gnome|centos-gnome) DESKTOP=GNOME ;;
+  sway)               DESKTOP=Sway ;;
+  cosmic)             DESKTOP=COSMIC ;;
+  xfce)               DESKTOP=Xfce ;;
+  budgie)             DESKTOP=Budgie ;;
+  base|centos-base)   DESKTOP="no desktop" ;;
   *) echo "unknown VARIANT '$VARIANT'" >&2; exit 1 ;;
 esac
+case "$VARIANT" in centos-*) want=centos ;; *) want=fedora ;; esac
+[ "$DISTRO" = "$want" ] || { echo "VARIANT '$VARIANT' needs a $want base image, not $DISTRO" >&2; exit 1; }
 
-FEDORA=$(rpm -E %fedora)
 KVER=$(rpm -q kernel --qf '%{VERSION}-%{RELEASE}.%{ARCH}')
+# What differs by distribution: RPM Fusion's branch, the NVIDIA driver (the
+# EL branch has it as a versioned stream), ID_LIKE, and where the kernel-devel
+# matching the kernel comes from. akmods requires it, and left to dnf the
+# repositories' newest comes with its kernel as a second one. CentOS Stream's
+# image is built ahead of its mirrors, so there it is fetched from the build
+# system, which keeps every build.
+case "$DISTRO" in
+  fedora)
+    RPMFUSION=fedora NVIDIA=akmod-nvidia CUDA=xorg-x11-drv-nvidia-cuda ID_LIKE=fedora
+    KDEVEL="kernel-devel-${KVER}"
+    ;;
+  centos)
+    RPMFUSION=el NVIDIA=akmod-nvidia-580xx CUDA=xorg-x11-drv-nvidia-580xx-cuda ID_LIKE="rhel centos fedora"
+    read -r kv kr < <(rpm -q kernel --qf '%{VERSION} %{RELEASE}\n')
+    koji="https://kojihub.stream.centos.org/kojifiles/packages/kernel/${kv}/${kr}/$(uname -m)"
+    KDEVEL="$koji/kernel-devel-${KVER}.rpm $koji/kernel-devel-matched-${KVER}.rpm"
+    ;;
+esac
 # /root is a dangling symlink to /var/roothome during the build
 export HOME=/tmp
 
@@ -41,22 +62,52 @@ dnf() {
   done
 }
 
-dnf -y install dnf5-plugins \
-  "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-${FEDORA}.noarch.rpm" \
-  "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-${FEDORA}.noarch.rpm"
-dnf config-manager addrepo --from-repofile=https://download.docker.com/linux/fedora/docker-ce.repo
-dnf config-manager addrepo --from-repofile=https://mise.jdx.dev/rpm/mise.repo
-dnf config-manager addrepo --from-repofile=https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo
+# --- Repositories -----------------------------------------------------------
+# CentOS: EPEL for the desktops beyond GNOME and most of the tools, CRB for
+# what EPEL builds against
+if [ "$DISTRO" = centos ]; then
+  dnf -y install epel-release
+  crb enable
+fi
+dnf -y install \
+  "https://mirrors.rpmfusion.org/free/${RPMFUSION}/rpmfusion-free-release-${RELEASE}.noarch.rpm" \
+  "https://mirrors.rpmfusion.org/nonfree/${RPMFUSION}/rpmfusion-nonfree-release-${RELEASE}.noarch.rpm"
+for r in "https://download.docker.com/linux/${DISTRO}/docker-ce.repo" \
+         https://mise.jdx.dev/rpm/mise.repo \
+         https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo; do
+  curl -o "/etc/yum.repos.d/${r##*/}" "$r"
+done
 
+# --- Desktop (CentOS) -------------------------------------------------------
+# CentOS's bootc image has no desktop, so it is a group install: GNOME from
+# CentOS, KDE Plasma from EPEL, plus the groups their installer environments
+# add. Not Core and Standard: the image is complete already, and they pin
+# tools to package versions the image is ahead of, failing the transaction.
+if [ "$DISTRO" = centos ]; then
+  case "$VARIANT" in
+    centos-gnome) groups="gnome-desktop workstation-product" ;;
+    centos-kde)   groups="kde-desktop" ;;
+    *)            groups="" ;;
+  esac
+  if [ -n "$groups" ]; then
+    # shellcheck disable=SC2086
+    dnf -y group install base-graphical fonts input-methods multimedia hardware-support \
+      guest-desktop-agents networkmanager-submodules desktop-accessibility $groups
+  fi
+fi
+
+# --- Packages ---------------------------------------------------------------
 curl -o /tmp/docker-sbx.rpm \
   "https://github.com/docker/sbx-releases/releases/latest/download/DockerSandboxes-linux-${ARCH}-rockylinux8.rpm"
-# shellcheck disable=SC2046
-dnf -y install $(sed 's/#.*//' /tmp/packages.txt) "kernel-devel-${KVER}" /tmp/docker-sbx.rpm
+# shellcheck disable=SC2046,SC2086
+dnf -y install $(sed 's/#.*//' /tmp/packages.txt) $KDEVEL /tmp/docker-sbx.rpm
 
-# Fedora's ROCm packages are x86_64 only
+# ROCm is x86_64 only, in Fedora and in EPEL (which has no OpenCL packages)
 if [ "$(uname -m)" = x86_64 ]; then
-  dnf -y install rocm-hip rocm-opencl rocm-runtime rocm-smi rocminfo rocm-clinfo \
-    rocblas hipblas hipblaslt rccl
+  rocm="rocm-hip rocm-runtime rocm-smi rocminfo rocblas hipblas hipblaslt rccl"
+  [ "$DISTRO" = centos ] || rocm="$rocm rocm-opencl rocm-clinfo"
+  # shellcheck disable=SC2086
+  dnf -y install $rocm
 fi
 
 # /usr is read-only on a bootc host, so build the NVIDIA kernel module now.
@@ -64,34 +115,40 @@ fi
 # akmods ourselves, then drop the build-time packages. akmods exits 0 on a
 # failed build, hence the modinfo check.
 #
-# On aarch64 the driver is best effort. RPM Fusion's aarch64 driver breaks in
-# ways x86_64's does not (615.71.09-3 requires a Tegra library no package
-# provides, so dnf fell back to the GA 595 driver, which no longer builds
-# against the current kernel) and an NVIDIA GPU in a Fedora aarch64 desktop is
-# rare; holding both architectures' images back for it is not worth it. The
-# image then keeps nouveau, which the kernel arguments would otherwise
-# blacklist, and says so in the build log.
-if dnf -y install --setopt=tsflags=noscripts akmod-nvidia &&
-   akmods --force --kernels "${KVER}" &&
-   modinfo -k "${KVER}" nvidia >/dev/null; then
-  dnf -y install xorg-x11-drv-nvidia-cuda
+# On x86_64 the driver is required: one that stops building fails the build
+# rather than quietly shipping nouveau. On aarch64 it is best effort: RPM
+# Fusion's aarch64 driver breaks in ways x86_64's does not (615.71.09-3 needs
+# a Tegra library nothing provides, and the 595 dnf falls back to no longer
+# builds) and an NVIDIA GPU in an aarch64 desktop is rare. The image then
+# keeps nouveau, which the kernel arguments would otherwise blacklist.
+nvidia_install() {
+  dnf -y install --setopt=tsflags=noscripts "$NVIDIA" &&
+    akmods --force --kernels "${KVER}" &&
+    modinfo -k "${KVER}" nvidia >/dev/null &&
+    dnf -y install "$CUDA"
+}
+if nvidia_install; then
+  :
 elif [ "$(uname -m)" = aarch64 ]; then
-  tail -n 30 /var/cache/akmods/nvidia/*.failed.log || true
+  tail -n 30 /var/cache/akmods/*/*.failed.log || true
   echo "WARNING: the NVIDIA driver could not be installed, building without it" >&2
   rm /usr/lib/bootc/kargs.d/10-nvidia.toml
 else
   exit 1
 fi
-dnf -y remove akmod-nvidia "kernel-devel-${KVER}"
+for p in "$NVIDIA" "kernel-devel-${KVER}"; do
+  if rpm -q "$p" >/dev/null; then dnf -y remove "$p"; fi
+done
 nvidia-ctk runtime configure --runtime=docker
 
-# Upstream Node bundles its own SQLite; OpenClaw refuses the system SQLite
-# Fedora's Node links against (WAL corruption bug in 3.51.2).
-case "$(uname -m)" in x86_64) NODE_ARCH=x64 ;; aarch64) NODE_ARCH=arm64 ;; esac
+# --- Agents -----------------------------------------------------------------
+# Upstream Node bundles its own SQLite; OpenClaw refuses the system SQLite the
+# distribution's Node links against (WAL corruption bug in 3.51.2).
 NODE=$(curl https://nodejs.org/dist/index.json |
   python3 -c 'import sys,json; print(next(v["version"] for v in json.load(sys.stdin) if v["version"].startswith("v24") and v["lts"]))')
 curl "https://nodejs.org/dist/${NODE}/node-${NODE}-linux-${NODE_ARCH}.tar.xz" |
-  tar xJ -C /usr --strip-components=1 --exclude='*/CHANGELOG.md' --exclude='*/LICENSE' --exclude='*/README.md'
+  tar xJ -C /usr --strip-components=1 --no-same-owner \
+    --exclude='*/CHANGELOG.md' --exclude='*/LICENSE' --exclude='*/README.md'
 npm install -g --prefix /usr @anthropic-ai/claude-code @openai/codex opencode-ai openclaw
 
 curl -o /usr/bin/llmman \
@@ -99,15 +156,41 @@ curl -o /usr/bin/llmman \
 chmod 755 /usr/bin/llmman
 /usr/bin/llmman --version
 
+# --- Desktop apps -----------------------------------------------------------
+# The agents' desktop apps that come as RPMs: ChatGPT (Codex is part of it)
+# and OpenCode. Claude's is a .deb only.
+curl -o /tmp/chatgpt.rpm \
+  "https://persistent.oaistatic.com/codex-app-prod/linux/rpm/latest/chatgpt.$(uname -m).rpm"
+curl -o /tmp/opencode-desktop.rpm \
+  "https://github.com/anomalyco/opencode/releases/latest/download/opencode-desktop-linux-$(uname -m).rpm"
+# OpenCode's RPM installs into /opt, which bootc keeps in the mutable /var
+# (there after the first install, never updated), so it moves under /usr.
+# Fedora's /opt is a dangling link; rpm needs its target to exist.
+install -d "$(readlink -f /opt)"
+dnf -y install /tmp/chatgpt.rpm /tmp/opencode-desktop.rpm
+# Updates come with the image; ChatGPT's repository would be one more host
+# for every dnf call to reach
+sed -i 's/^enabled=1/enabled=0/' /etc/yum.repos.d/chatgpt.repo
+mv /opt/OpenCode /usr/lib/opencode-desktop
+sed -i 's|/opt/OpenCode/|/usr/lib/opencode-desktop/|' \
+  /usr/share/applications/opencode-desktop.desktop /usr/share/applications/ai.opencode.desktop.desktop
+# The %post's alternatives entry and the build-id links point into /opt too
+update-alternatives --remove ai.opencode.desktop /opt/OpenCode/ai.opencode.desktop || true
+ln -sfn ../lib/opencode-desktop/ai.opencode.desktop /usr/bin/ai.opencode.desktop
+ln -sfn ../lib/opencode-desktop/ai.opencode.desktop /usr/bin/opencode-desktop
+find /usr/lib/.build-id -lname '*/opt/OpenCode/*' | while read -r l; do
+  ln -sfn "$(readlink "$l" | sed 's|/opt/OpenCode/|/usr/lib/opencode-desktop/|')" "$l"
+done
+
 # --- Identity ---------------------------------------------------------------
-# This is a remix built from Fedora's packages, not Fedora: Fedora's trademark
-# guidelines allow the former but not presenting a modified distribution under
-# Fedora's name and logo. Fedora ships generic-logos for exactly this, an
-# unbranded drop-in for its artwork package (same file names and provides, so
-# nothing that wants a system logo breaks). Its release identity files are
-# plain text and are overwritten below; the fedora-release packages themselves
-# stay, many packages require them by name. Done after every dnf transaction
-# so no package update can put the originals back.
+# A remix of Fedora's or CentOS's packages, not Fedora or CentOS: their
+# trademark guidelines allow that, not a modified distribution under their
+# name and logo. Fedora's generic-logos is an unbranded drop-in for its
+# artwork package (same file names and provides); CentOS has none, so
+# centos-logos stays and its artwork is overwritten below. The release files
+# are plain text and overwritten too; the release packages stay, many
+# packages require them. Done after every dnf transaction so no update can
+# put the originals back.
 if rpm -q fedora-logos >/dev/null; then
   dnf -y swap fedora-logos generic-logos
 fi
@@ -131,21 +214,29 @@ done
 install -Dm644 /tmp/logo/agenticlinux-logo.svg /usr/share/pixmaps/agenticlinux-logo.svg
 install -Dm644 /tmp/logo/agenticlinux-logo-256.png /usr/share/pixmaps/agenticlinux-logo.png
 
-# generic-logos keeps fedora-logos' file names but fills them with placeholder
-# art (a dancing hot dog), and those names are what the desktops ask for:
-# Plasma's launcher icon is "start-here" (kde-settings), the system logo icon
-# is "fedora-logo-icon", anaconda and the login greeters read the pixmaps.
-# Put the AgenticLinux logo behind every one of those names.
-if rpm -q generic-logos >/dev/null; then
-  for f in $(rpm -ql generic-logos | grep -E '/(fedora-logo|start-here|system-logo)[^/]*\.(png|svg)$'); do
+# generic-logos keeps fedora-logos' file names with placeholder art (a
+# dancing hot dog), centos-logos has CentOS's under mostly the same names,
+# and those names are what the desktops ask for: Plasma's launcher icon is
+# "start-here", the system logo icon "fedora-logo-icon", anaconda, GDM and
+# the greeters read the pixmaps. Put the AgenticLinux logo behind every one,
+# at the size the icon directory names.
+for p in generic-logos centos-logos; do
+  rpm -q "$p" >/dev/null || continue
+  for f in $(rpm -ql "$p" | grep -E '/(fedora[-_]logo|fedora-gdm-logo|centos[-_]logo|start-here|system-logo|bootlogo)[^/]*\.(png|svg)$'); do
     [ -L "$f" ] && continue
     case "$f" in
       *.svg) install -m644 /tmp/logo/agenticlinux-logo.svg "$f" ;;
-      *-small.png) install -m644 /tmp/logo/agenticlinux-logo-128.png "$f" ;;
-      *.png) install -m644 /tmp/logo/agenticlinux-logo-256.png "$f" ;;
+      *.png)
+        s=256
+        [[ $f =~ /([0-9]+)x[0-9]+/ ]] && s=${BASH_REMATCH[1]}
+        [[ $f =~ _([0-9]+)\.png$ ]] && s=${BASH_REMATCH[1]}
+        [[ $f == *-small.png ]] && s=128
+        case " $sizes " in *" $s "*) ;; *) s=256 ;; esac
+        install -m644 "/tmp/logo/agenticlinux-logo-$s.png" "$f"
+        ;;
     esac
   done
-fi
+done
 # GTK trusts an icon cache that is newer than its directory, so refresh it
 if command -v gtk-update-icon-cache >/dev/null; then
   gtk-update-icon-cache -f -t -q /usr/share/icons/hicolor
@@ -153,7 +244,7 @@ else
   touch /usr/share/icons/hicolor
 fi
 
-# GNOME's background-logo extension is preset to fedora-logos' files
+# GNOME's background-logo extension is preset to the distribution's logo
 schemas=/usr/share/glib-2.0/schemas
 if [ -e "$schemas/org.fedorahosted.background-logo-extension.gschema.xml" ]; then
   cat > "$schemas/zz-agenticlinux-background-logo.gschema.override" <<EOF
@@ -165,8 +256,8 @@ EOF
 fi
 
 # --- Wallpaper --------------------------------------------------------------
-# The default wallpaper is Fedora's release artwork, wired up by the
-# desktop-backgrounds packages: gsettings overrides for GNOME and Budgie,
+# The default wallpaper is the distribution's release artwork, wired up by
+# its backgrounds packages: gsettings overrides for GNOME and Budgie,
 # /usr/share/wallpapers/Default for Plasma (its look-and-feel and lock screen
 # are preset to it), and /usr/share/backgrounds/default*.jxl for Sway, Xfce,
 # COSMIC and the greeters. Render the AgenticLinux wallpaper and point each
@@ -251,9 +342,9 @@ for f in /usr/share/plasma/look-and-feel/org.fedoraproject.fedora*.desktop/metad
          -e 's/"Description": "[^"]*"/"Description": "AgenticLinux theme"/' "$f"
 done
 
-# The boot splash's watermark was fedora-logos' too, and it is baked into the
-# initramfs, so that is rebuilt the way rpm-ostree builds it for these images
-# (their dracut.conf.d already says hostonly=no).
+# The boot splash's watermark was the logo package's too, and it is baked into
+# the initramfs, so that is rebuilt the way the bootc images build it (their
+# dracut.conf.d already says hostonly=no).
 if [ -d /usr/share/plymouth/themes/spinner ]; then
   install -m644 /tmp/logo/agenticlinux-logo-64.png /usr/share/plymouth/themes/spinner/watermark.png
   dracut --no-hostonly --kver "$KVER" --reproducible --add ostree --tmpdir /tmp -f /tmp/initramfs.img
@@ -262,26 +353,48 @@ fi
 
 cat > /usr/lib/os-release <<EOF
 NAME="AgenticLinux"
-VERSION="${FEDORA} (${DESKTOP})"
+VERSION="${RELEASE} (${DESKTOP})"
 ID=agenticlinux
-ID_LIKE=fedora
-VERSION_ID=${FEDORA}
-PRETTY_NAME="AgenticLinux ${FEDORA} (${DESKTOP})"
+ID_LIKE="${ID_LIKE}"
+VERSION_ID=${RELEASE}
+PRETTY_NAME="AgenticLinux ${RELEASE} (${DESKTOP})"
 ANSI_COLOR="0;38;2;124;108;248"
 LOGO=agenticlinux
-CPE_NAME="cpe:/o:agenticlinux:agenticlinux:${FEDORA}"
+CPE_NAME="cpe:/o:agenticlinux:agenticlinux:${RELEASE}"
 DEFAULT_HOSTNAME="agenticlinux"
 HOME_URL="${REPO_URL}"
 DOCUMENTATION_URL="${REPO_URL}#readme"
 SUPPORT_URL="${REPO_URL}/issues"
 BUG_REPORT_URL="${REPO_URL}/issues"
 VARIANT="${DESKTOP}"
-VARIANT_ID=${VARIANT_ID}
+VARIANT_ID=${VARIANT}
 EOF
-# /etc/system-release, /etc/redhat-release and /etc/fedora-release link here
-echo "AgenticLinux release ${FEDORA}" > /usr/lib/fedora-release
+# dnf reads the platform module stream from here
+[ -z "$PLATFORM" ] || echo "PLATFORM_ID=\"${PLATFORM}\"" >> /usr/lib/os-release
+# The release file /etc/system-release and /etc/redhat-release link to (under
+# /usr/lib on Fedora, /etc/centos-release itself on CentOS), and the CPE file
+for f in /usr/lib/fedora-release /etc/centos-release; do
+  [ -f "$f" ] && [ ! -L "$f" ] && echo "AgenticLinux release ${RELEASE}" > "$f"
+done
+for f in /usr/lib/system-release-cpe /etc/system-release-cpe; do
+  [ -f "$f" ] && [ ! -L "$f" ] && echo "cpe:/o:agenticlinux:agenticlinux:${RELEASE}" > "$f"
+done
+
+# CentOS's image had no display manager until the group install. Presets
+# enable GDM and SDDM; Plasma's own login manager has none.
+if [ "$DISTRO" = centos ] && [ "$DESKTOP" != "no desktop" ]; then
+  systemctl set-default graphical.target
+  if [ ! -e /etc/systemd/system/display-manager.service ]; then
+    for dm in gdm plasmalogin sddm; do
+      [ -e "/usr/lib/systemd/system/$dm.service" ] || continue
+      systemctl enable "$dm.service"
+      break
+    done
+  fi
+fi
 
 systemctl enable docker.service
 
+# /tmp was HOME for the build, so npm's cache and the like are dotfiles there
 dnf clean all
-rm -rf /var/cache /var/log/* /run/dnf /tmp/*
+rm -rf /var/cache /var/lib/dnf /var/log/* /run/* /tmp/* /tmp/.[!.]*

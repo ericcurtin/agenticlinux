@@ -10,6 +10,7 @@ on:
 env:
   IMAGE: docker.io/${{ vars.DOCKER_HUB_USER }}/agenticlinux
   FEDORA: 44
+  CENTOS: 10
   REPO_URL: ${{ github.server_url }}/${{ github.repository }}
 
 # A newer push supersedes whatever is running: nothing is published until the
@@ -28,9 +29,12 @@ concurrency:
 # The agent turns on a local model run in the KVM and WHPX guests only; the
 # HVF guests on the Intel macOS runners are 5-10x slower.
 jobs:
-  # The variants are named after their desktop; that is also the public tag and
-  # the ISO name. "bases" maps each onto the upstream image it is built from
-  # (Dockerfile VARIANT); build.sh has the same table for the OS identity.
+  # The variants are named after their desktop, prefixed with the distribution
+  # unless that is Fedora; that is also the public tag and the ISO name.
+  # "bases" maps each onto the upstream bootc image it is built from
+  # (Dockerfile BASE): Fedora's desktop images, or CentOS Stream's one image,
+  # which has no desktop, so build.sh installs it. build.sh has the same table
+  # for the OS identity.
   setup:
     runs-on: ubuntu-24.04
     outputs:
@@ -41,8 +45,13 @@ jobs:
       - id: out
         run: |
           echo "tag=$FEDORA.$(date -u +%Y%m%d).$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
-          echo 'variants=["kde","gnome","sway","cosmic","xfce","budgie","base"]' >> "$GITHUB_OUTPUT"
-          echo 'bases={"kde":"kinoite","gnome":"silverblue","sway":"sway-atomic","cosmic":"cosmic-atomic","xfce":"xfce-atomic","budgie":"budgie-atomic","base":"base-atomic"}' >> "$GITHUB_OUTPUT"
+          echo 'variants=["kde","gnome","sway","cosmic","xfce","budgie","base","centos-kde","centos-gnome","centos-base"]' >> "$GITHUB_OUTPUT"
+          f=quay.io/fedora-ostree-desktops c=quay.io/centos-bootc/centos-bootc:stream$CENTOS
+          bases=$(printf '"%s":"%s",' \
+            kde "$f/kinoite:$FEDORA" gnome "$f/silverblue:$FEDORA" sway "$f/sway-atomic:$FEDORA" \
+            cosmic "$f/cosmic-atomic:$FEDORA" xfce "$f/xfce-atomic:$FEDORA" budgie "$f/budgie-atomic:$FEDORA" \
+            base "$f/base-atomic:$FEDORA" centos-kde "$c" centos-gnome "$c" centos-base "$c")
+          echo "bases={${bases%,}}" >> "$GITHUB_OUTPUT"
 
   # Build each variant natively and run the smoke test in a container of it;
   # on x86_64 also install it into a qcow2 and boot it under KVM for the full
@@ -71,8 +80,8 @@ jobs:
         with:
           context: .
           build-args: |
-            VARIANT=${{ fromJSON(needs.setup.outputs.bases)[matrix.variant] }}
-            FEDORA=${{ env.FEDORA }}
+            BASE=${{ fromJSON(needs.setup.outputs.bases)[matrix.variant] }}
+            VARIANT=${{ matrix.variant }}
             REPO_URL=${{ env.REPO_URL }}
           tags: agenticlinux:${{ matrix.variant }}
           outputs: type=docker,dest=${{ runner.temp }}/image.tar
@@ -114,9 +123,10 @@ jobs:
         # TSC is calibrated, and a loaded HVF host has missed that and panicked
         # 16 ms into boot (the kernel skips the test itself on every hypervisor
         # it recognizes, KVM, Hyper-V and VMware, but sees HVF as bare metal).
+        # The installer runs from the distribution's own bootc image.
         env:
           VARIANT: ${{ matrix.variant }}
-          BOOTC: quay.io/fedora/fedora-bootc:${{ env.FEDORA }}
+          BOOTC: ${{ startsWith(matrix.variant, 'centos-') && format('quay.io/centos-bootc/centos-bootc:stream{0}', env.CENTOS) || format('quay.io/fedora/fedora-bootc:{0}', env.FEDORA) }}
         run: |
           mkdir oci && docker save agenticlinux:smoke | tar x -C oci
           # The image is in the artifact and in oci now. Everything Docker
@@ -325,13 +335,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build ISO
+        # iso/build.sh runs in a container of the image's distribution: that
+        # is where lorax and the network installer ISO come from
         env:
           VARIANT: ${{ matrix.variant }}
           TAG: ${{ needs.setup.outputs.tag }}
+          BUILDER: ${{ startsWith(matrix.variant, 'centos-') && format('quay.io/centos/centos:stream{0}', env.CENTOS) || format('fedora:{0}', env.FEDORA) }}
         run: |
           iso="agenticlinux-$VARIANT-$(uname -m).iso"
-          for i in $(seq 12); do docker pull fedora:${{ env.FEDORA }} && break || sleep 20; done
-          docker run --rm -v "$PWD:/w" -w /w -e REPO_URL fedora:${{ env.FEDORA }} \
+          for i in $(seq 12); do docker pull "$BUILDER" && break || sleep 20; done
+          docker run --rm -v "$PWD:/w" -w /w -e REPO_URL "$BUILDER" \
             iso/build.sh "$IMAGE:$VARIANT-$TAG" "$VARIANT" "/w/$iso"
           sha256sum "$iso" > "$iso.sha256"
       - name: Upload to release
