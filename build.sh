@@ -190,34 +190,29 @@ find /usr/lib/.build-id -lname '*/opt/OpenCode/*' | while read -r l; do
 done
 
 # --- Browser ----------------------------------------------------------------
-# Google Chrome from Google's repository (signed; the RPM's %post would write
-# the same file). Google builds it for x86_64 only, so aarch64 keeps the
-# distribution's Chromium. Chrome installs into /opt like OpenCode and moves
-# under /usr the same way: its launcher finds its files through readlink -f,
-# the menu entries go through /usr/bin/google-chrome-stable, and only GNOME's
-# default-apps entry names the directory. The repository and the daily cron
-# job that re-adds it are how Google updates a mutable system; here updates
-# come with the image.
-if [ "$(uname -m)" = x86_64 ]; then
-  cat > /etc/yum.repos.d/google-chrome.repo <<EOF
+# Google Chrome from Google's repository (signed, one per architecture; the
+# RPM's %post would write the same file). Chrome installs into /opt like
+# OpenCode and moves under /usr the same way: its launcher finds its files
+# through readlink -f, the menu entries go through
+# /usr/bin/google-chrome-stable, and only GNOME's default-apps entry names the
+# directory. The repository and the daily cron job that re-adds it are how
+# Google updates a mutable system; here updates come with the image.
+cat > /etc/yum.repos.d/google-chrome.repo <<EOF
 [google-chrome]
 name=google-chrome
-baseurl=https://dl.google.com/linux/chrome/rpm/stable/x86_64
+baseurl=https://dl.google.com/linux/chrome/rpm/stable/$(uname -m)
 enabled=1
 gpgcheck=1
 gpgkey=https://dl.google.com/linux/linux_signing_key.pub
 EOF
-  dnf -y install google-chrome-stable
-  sed -i 's/^enabled=1/enabled=0/' /etc/yum.repos.d/google-chrome.repo
-  rm /etc/cron.daily/google-chrome
-  mv /opt/google/chrome /usr/lib/google-chrome
-  rmdir /opt/google
-  ln -sfn ../lib/google-chrome/google-chrome /usr/bin/google-chrome-stable
-  sed -i 's|/opt/google/chrome/|/usr/lib/google-chrome/|' \
-    /usr/share/gnome-control-center/default-apps/google-chrome.xml
-else
-  dnf -y install chromium
-fi
+dnf -y install google-chrome-stable
+sed -i 's/^enabled=1/enabled=0/' /etc/yum.repos.d/google-chrome.repo
+rm /etc/cron.daily/google-chrome
+mv /opt/google/chrome /usr/lib/google-chrome
+rmdir /opt/google
+ln -sfn ../lib/google-chrome/google-chrome /usr/bin/google-chrome-stable
+sed -i 's|/opt/google/chrome/|/usr/lib/google-chrome/|' \
+  /usr/share/gnome-control-center/default-apps/google-chrome.xml
 
 # --- Identity ---------------------------------------------------------------
 # A remix of Fedora's or CentOS's packages, not Fedora or CentOS: their

@@ -62,8 +62,7 @@ dotnet-runtime-10.0
 python3-poetry-core
 tree-sitter-cli
 
-# --- GUI applications (the browser is in build.sh: Google Chrome on x86_64,
-# Chromium on aarch64) -------------------------------------------------------
+# --- GUI applications (Google Chrome is in build.sh, from Google's repo) ----
 nautilus
 nautilus-python
 gnome-disk-utility

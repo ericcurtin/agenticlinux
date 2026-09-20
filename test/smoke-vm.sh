@@ -68,17 +68,9 @@ for c in "sbx version" "llmman --version" "herdr --version" "opencode --version"
   as_test "$c"
 done
 
-# The desktop apps (ChatGPT, OpenCode, and Chrome where Google builds it):
-# launcher, menu entry, and every shared library of the binary resolved;
-# without a display that is as far as a check can go.
-apps="chatgpt          chatgpt              chatgpt/ChatGPT
-opencode-desktop ai.opencode.desktop  opencode-desktop/ai.opencode.desktop"
-if [ "$(uname -m)" = x86_64 ]; then
-  apps="$apps
-google-chrome-stable google-chrome google-chrome/chrome"
-else
-  test -x /usr/bin/chromium-browser
-fi
+# The desktop apps (ChatGPT, OpenCode, Chrome): launcher, menu entry, and
+# every shared library of the binary resolved; without a display that is as
+# far as a check can go.
 while read -r bin entry exe; do
   test -x "/usr/bin/$bin"
   test -e "/usr/share/applications/$entry.desktop"
@@ -86,7 +78,11 @@ while read -r bin entry exe; do
     echo "/usr/lib/$exe: missing or unresolved libraries"
     exit 1
   fi
-done <<<"$apps"
+done <<EOF
+chatgpt              chatgpt              chatgpt/ChatGPT
+opencode-desktop     ai.opencode.desktop  opencode-desktop/ai.opencode.desktop
+google-chrome-stable google-chrome        google-chrome/chrome
+EOF
 
 # Agents on a local model through llmman. A turn that runs away (see above)
 # fails with the token limit, in about 10 minutes at the 7-8 tokens/s these
