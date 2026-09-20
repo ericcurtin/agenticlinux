@@ -5,9 +5,10 @@
 <h1 align="center">AgenticLinux</h1>
 
 A Linux desktop built for working with AI agents. Everything is there on
-first boot: the `claude`, `codex`, `opencode` and `openclaw` agents and the
+first boot: the `claude`, `codex`, `opencode` and `openclaw` agents,
+[herdr](https://herdr.dev) to run them side by side, the
 [ChatGPT](https://learn.chatgpt.com/docs/app) (with Codex) and
-[OpenCode](https://opencode.ai) desktop apps,
+[OpenCode](https://opencode.ai) desktop apps, Google Chrome,
 [llmman](https://github.com/llmmanorg/llmman) to run models locally or connect
 any agent to any provider, [Docker Engine](https://docs.docker.com/engine/) and
 [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) to run agents in
