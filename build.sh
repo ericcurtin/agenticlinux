@@ -395,6 +395,9 @@ fi
 
 systemctl enable docker.service
 
-# /tmp was HOME for the build, so npm's cache and the like are dotfiles there
+# /tmp was HOME for the build, so npm's cache and the like are dotfiles there.
+# Not /run/*: BuildKit bind-mounts its resolv.conf where the image's
+# /etc/resolv.conf points, /run/systemd/resolve/stub-resolv.conf, and rm on
+# a mountpoint fails the build. /run is a tmpfs on the host anyway.
 dnf clean all
-rm -rf /var/cache /var/lib/dnf /var/log/* /run/* /tmp/* /tmp/.[!.]*
+rm -rf /var/cache /var/lib/dnf /var/log/* /run/akmods /run/dnf /tmp/* /tmp/.[!.]*
