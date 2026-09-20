@@ -68,6 +68,21 @@ for c in "sbx version" "llmman --version" "opencode --version" "codex --version"
   as_test "$c"
 done
 
+# The desktop apps (ChatGPT, OpenCode): launcher, menu entry, and every shared
+# library of the Electron binary resolved; without a display that is as far
+# as a check can go.
+while read -r bin entry exe; do
+  test -x "/usr/bin/$bin"
+  test -e "/usr/share/applications/$entry.desktop"
+  if ! libs=$(ldd "/usr/lib/$exe") || grep 'not found' <<<"$libs"; then
+    echo "/usr/lib/$exe: missing or unresolved libraries"
+    exit 1
+  fi
+done <<EOF
+chatgpt          chatgpt              chatgpt/ChatGPT
+opencode-desktop ai.opencode.desktop  opencode-desktop/ai.opencode.desktop
+EOF
+
 # Agents on a local model through llmman. A turn that runs away (see above)
 # fails with the token limit, in about 10 minutes at the 7-8 tokens/s these
 # runners generate, and is retried; each sample is independent and a retry

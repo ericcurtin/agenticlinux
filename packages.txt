@@ -1,4 +1,5 @@
-# One package per line; '#' starts a comment.
+# One package per line; '#' starts a comment. Every package here exists on
+# both Fedora and CentOS Stream (with EPEL and RPM Fusion).
 
 # --- Docker Engine ----------------------------------------------------------
 docker-ce
@@ -15,38 +16,25 @@ akmods
 nvidia-container-toolkit
 
 # --- Wayland utilities ------------------------------------------------------
+xdg-desktop-portal
 xdg-desktop-portal-gtk
-grim
-slurp
 wl-clipboard
-wtype
-brightnessctl
 ddcutil
-udiskie
 gnome-keyring
 libsecret
-adw-gtk3-theme
-yaru-icon-theme
-fcitx5
-fcitx5-gtk
-fcitx5-qt
 qt6-qtimageformats
 qt6-qtmultimedia
 python3-gobject
 
 # --- Terminal / shell / CLI -------------------------------------------------
-foot
 bash-completion
-zoxide
 fzf
 fd-find
 ripgrep
 bat
-eza
 jq
 gum
 tmux
-tealdeer
 less
 man-db
 unzip
@@ -55,10 +43,9 @@ socat
 plocate
 inotify-tools
 fastfetch
-inxi
 btop
-dua-cli
 neovim
+tldr
 
 # --- Development ------------------------------------------------------------
 git
@@ -66,37 +53,36 @@ mise
 clang
 llvm
 ruby
-lua5.1
+lua
 luarocks
 libyaml
-vips
 mariadb-connector-c
 libpq
 dotnet-runtime-10.0
 python3-poetry-core
 tree-sitter-cli
-qemu-user-static
 
 # --- GUI applications -------------------------------------------------------
 chromium
 nautilus
 nautilus-python
-sushi
 gnome-disk-utility
-evince
-imv
+papers
 mpv
-mpv-mpris
-libreoffice
 xournalpp
-pinta
 kdenlive
-obs-studio
+
+# --- Desktop apps' runtime (ChatGPT and OpenCode are Electron apps; what
+# their RPMs require, so the base variant has it too) ------------------------
+libnotify
+libXtst
+libXScrnSaver
+libappindicator-gtk3
+xdg-utils
 
 # --- Media / imaging / OCR --------------------------------------------------
 ImageMagick
 ffmpegthumbnailer
-yt-dlp
 tesseract
 tesseract-langpack-eng
 zbar
@@ -107,26 +93,22 @@ google-noto-sans-fonts
 google-noto-sans-cjk-fonts
 google-noto-color-emoji-fonts
 jetbrains-mono-fonts-all
-fontawesome-fonts
+fontawesome4-fonts
 fontconfig
 
 # --- Hardware / system services ---------------------------------------------
 NetworkManager
 wireless-regdb
 bluez
-bluez-tools
 bolt
 avahi
 nss-mdns
 wireplumber
 alsa-utils
-pamixer
 cups
 cups-filters
 cups-pk-helper
-system-config-printer
 gvfs-mtp
-gvfs-nfs
 gvfs-smb
 dosfstools
 exfatprogs
