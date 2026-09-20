@@ -382,8 +382,15 @@ done
 
 # CentOS's image had no display manager until the group install. Presets
 # enable GDM and SDDM; Plasma's own login manager has none.
+#
+# The default target is set where Fedora's desktop images set theirs, in
+# /usr/lib, not with systemctl set-default: that writes
+# /etc/systemd/system/default.target, which outranks the generator directory
+# systemd-run-generator redirects default.target from, so the smoke test's
+# systemd.run= would be ignored and the guest would boot to the login prompt.
 if [ "$DISTRO" = centos ] && [ "$DESKTOP" != "no desktop" ]; then
-  systemctl set-default graphical.target
+  ln -sfn graphical.target /usr/lib/systemd/system/default.target
+  rm -f /etc/systemd/system/default.target
   if [ ! -e /etc/systemd/system/display-manager.service ]; then
     for dm in gdm plasmalogin sddm; do
       [ -e "/usr/lib/systemd/system/$dm.service" ] || continue
