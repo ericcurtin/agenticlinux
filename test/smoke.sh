@@ -12,6 +12,7 @@ set -euo pipefail
 disk=$1
 arch=${2:-$(uname -m)}
 inference=${SMOKE_INFERENCE:-1}
+mem=8G; [ "$inference" != 0 ] || mem=4G
 # For the whole boot and test (the agent turns alone take 17 minutes under
 # WHPX, plus up to 30 for one turn the guest times out and the two shorter,
 # token-capped retries of it, see smoke-vm.sh), and for the guest's first test
@@ -25,9 +26,15 @@ case "$arch" in
 esac
 
 cpu=host
+smp=4
 case "$(uname -s)" in
   Linux) accel=kvm; [ -w /dev/kvm ] || { echo "no usable /dev/kvm"; exit 1; } ;;
-  Darwin) accel=hvf ;;
+  # The macOS Intel runners have 4 cores and 14 GB, and are VMs themselves.
+  # A guest with all 4 has starved the runner agent of CPU: 44 minutes into
+  # one smoke test (the nine others took 10-20) GitHub ended the job with
+  # "the hosted runner lost communication with the server", no log kept.
+  # Leave two cores to macOS and the agent.
+  Darwin) accel=hvf smp=2 ;;
   # WHPX has no "host" model, and "max" hands the guest every feature the
   # Hyper-V partition advertises, which varies with the Azure host the runner
   # lands on. On one such host the guest kernel's cred state was corrupted
@@ -72,8 +79,9 @@ for attempt in 1 2; do
   # ("Image is corrupt; cannot be opened read/write").
   #
   # 8 GB: the guest runs docker, the llmman daemon and llama-server with the
-  # model and its KV cache (bounded in smoke-vm.sh); the smallest runner
-  # (macOS Intel) has 14 GB.
+  # model and its KV cache (bounded in smoke-vm.sh). Without the agent turns
+  # there is no model to hold, and 4 GB leaves the rest of the 14 GB macOS
+  # Intel runner to macOS and the runner agent (see smp above).
   #
   # ipv6=off: user-mode networking gives the guest an IPv6 address and router
   # by default, but the runners have no IPv6 route out, so a registry that
@@ -81,7 +89,7 @@ for attempt in 1 2; do
   # timeout ("dial tcp [2600:...]:443: i/o timeout" from llmman pull on a
   # Windows runner) instead of failing fast and moving on to IPv4. With no
   # IPv6 on the link the guest only ever dials IPv4.
-  "$qemu" -M "$machine" -accel "$accel" -cpu "$cpu" -smp 4 -m 8G -no-reboot \
+  "$qemu" -M "$machine" -accel "$accel" -cpu "$cpu" -smp "$smp" -m "$mem" -no-reboot \
     -display none -monitor none -serial "file:$serial" \
     -fw_cfg name=opt/agenticlinux/inference,string="$inference" \
     -drive if=pflash,format=raw,readonly=on,file=firmware.fd \
