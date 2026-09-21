@@ -81,9 +81,14 @@ fi
 (cd updates && find . | cpio -o -H newc --quiet | gzip) > images/updates.img
 
 # The volume id names the medium (and mkksiso rewrites the kernel arguments
-# that refer to it); the boot menu entries are rewritten in place.
+# that refer to it); the boot menu entries are rewritten in place. ISO 9660
+# allows it 32 characters: the project and variant fit every variant, the
+# architecture would not (AgenticLinux-centos-gnome-aarch64 is 33) and the
+# file name carries it.
+volid="AgenticLinux-${variant}"
+[ "${#volid}" -le 32 ] || { echo "volume id '$volid' is over 32 characters" >&2; exit 1; }
 mkksiso --skip-mkefiboot --ks agenticlinux.ks -a images \
-  -V "AgenticLinux-${variant}-${arch}" \
+  -V "$volid" \
   -R "$upstream" "AgenticLinux ${release}" \
   -R "$system" "an AgenticLinux system" \
   netinst.iso "$out"
