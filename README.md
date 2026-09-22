@@ -91,9 +91,7 @@ sudo bootc switch docker.io/ericcurtin044/agenticlinux:kde
 ```
 
 The root filesystem (which holds `/var`, `/home` and `/root`) defaults to xfs
-for both `bootc install` and the ISO. `/dev/kvm`, which Docker Sandboxes
-need, is open to every user: Fedora and CentOS Stream make it mode 0666, so
-no `kvm` group membership is involved.
+for both `bootc install` and the ISO.
 
 ## GPUs
 
