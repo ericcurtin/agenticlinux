@@ -97,8 +97,10 @@ if [ "$DISTRO" = centos ]; then
 fi
 
 # --- Packages ---------------------------------------------------------------
+# Docker Sandboxes from its nightly build of main (a rolling release tag, the
+# same asset names as the tagged releases)
 curl -o /tmp/docker-sbx.rpm \
-  "https://github.com/docker/sbx-releases/releases/latest/download/DockerSandboxes-linux-${ARCH}-rockylinux8.rpm"
+  "https://github.com/docker/sbx-releases/releases/download/nightly/DockerSandboxes-linux-${ARCH}-rockylinux8.rpm"
 # shellcheck disable=SC2046,SC2086
 dnf -y install $(sed 's/#.*//' /tmp/packages.txt) $KDEVEL /tmp/docker-sbx.rpm
 
