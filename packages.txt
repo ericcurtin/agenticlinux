@@ -8,6 +8,10 @@ containerd.io
 docker-buildx-plugin
 docker-compose-plugin
 
+# --- Container-based development environments -------------------------------
+distrobox
+toolbox
+
 # --- GPU (ROCm and the NVIDIA driver are handled in build.sh) ---------------
 vulkan-loader
 vulkan-tools
@@ -94,6 +98,9 @@ google-noto-color-emoji-fonts
 jetbrains-mono-fonts-all
 fontawesome4-fonts
 fontconfig
+
+# --- Remote desktop ---------------------------------------------------------
+krdp
 
 # --- Hardware / system services ---------------------------------------------
 NetworkManager
