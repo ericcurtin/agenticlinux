@@ -487,6 +487,15 @@ fi
 
 systemctl enable docker.service
 
+# The base images keep file capabilities (newuidmap's, which rootless podman
+# needs) in ostree's own metadata, which BuildKit does not apply, so the
+# repacking in rechunk.sh would drop them. Set them again from the rpmdb.
+rpm -qa --qf '[%{FILECAPS}\t%{FILENAMES}\n]' | grep -v -e '^(none)' -e $'^\t' |
+  while IFS=$'\t' read -r cap f; do
+    if [ -e "$f" ]; then setcap "$cap" "$f"; fi
+  done
+[[ $(getcap /usr/bin/newuidmap) == *cap_setuid* ]]
+
 # /tmp was HOME for the build, so npm's cache and the like are dotfiles there.
 # Not /run/*: BuildKit bind-mounts its resolv.conf where the image's
 # /etc/resolv.conf points, /run/systemd/resolve/stub-resolv.conf, and rm on
