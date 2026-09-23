@@ -83,6 +83,17 @@ esac
 if [ "$DISTRO" = centos ]; then
   dnf -y install epel-release
   crb enable
+  # Cisco's openh264 build, as fedora-cisco-openh264 on Fedora; EPEL 10's
+  # epel-release no longer ships the repo file EPEL 9's had
+  cat > /etc/yum.repos.d/epel-cisco-openh264.repo <<EOF
+[epel-cisco-openh264]
+name=Extra Packages for Enterprise Linux ${RELEASE} openh264 (From Cisco) - \$basearch
+metalink=https://mirrors.fedoraproject.org/metalink?repo=epel-cisco-openh264-${RELEASE}&arch=\$basearch
+enabled=1
+metadata_expire=14d
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-EPEL-${RELEASE}
+EOF
 fi
 dnf -y install \
   "https://mirrors.rpmfusion.org/free/${RPMFUSION}/rpmfusion-free-release-${RELEASE}.noarch.rpm" \

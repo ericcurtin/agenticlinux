@@ -11,7 +11,8 @@ first boot: the `claude`, `codex`, `opencode` and `openclaw` agents,
 [ChatGPT](https://learn.chatgpt.com/docs/app) (with Codex) and
 [OpenCode](https://opencode.ai) desktop apps, Google Chrome,
 [llmman](https://github.com/llmmanorg/llmman) to run models locally or connect
-any agent to any provider, [Docker Engine](https://docs.docker.com/engine/) and
+any agent to any provider, [Docker Engine](https://docs.docker.com/engine/)
+(rootful and [rootless](https://docs.docker.com/engine/security/rootless/)) and
 [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) to run agents in
 isolation, GPU runtimes for Vulkan, ROCm and NVIDIA/CUDA, and a full developer
 toolset.
@@ -35,7 +36,8 @@ and available for x86_64 and aarch64.
 1. Download the ISO for your desktop and architecture from the
    [latest release](https://github.com/ericcurtin/agenticlinux/releases/latest),
    boot it and install as usual.
-2. Add yourself to the `docker` group, then log out and back in:
+2. Add yourself to the `docker` group, then log out and back in (or use
+   [rootless Docker](#docker) instead):
 
    ```sh
    sudo usermod -aG docker "$USER"
@@ -82,6 +84,24 @@ needs a tray extension for the icon.
 
 The apps live in the read-only `/usr`, so nothing in them can update itself
 in place: they are updated with the image, like everything else.
+
+## Docker
+
+Two daemons, with separate images and containers:
+
+- **Rootful**: the system `docker.service`, for members of the `docker`
+  group. It is the CLI's `default` context and has the NVIDIA runtime
+  (`--gpus all`).
+- **Rootless**: a daemon per user, without root privileges. Set it up once
+  (add `--force` if you are in the `docker` group):
+
+  ```sh
+  dockerd-rootless-setuptool.sh install
+  ```
+
+  This starts it as a systemd user service and switches the CLI to its
+  `rootless` context. Switch back with `docker context use default`. To
+  keep it running after logout, run `sudo loginctl enable-linger "$USER"`.
 
 ## Install
 

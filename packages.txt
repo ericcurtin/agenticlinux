@@ -4,6 +4,7 @@
 # --- Docker Engine ----------------------------------------------------------
 docker-ce
 docker-ce-cli
+docker-ce-rootless-extras  # rootless mode; docker-ce only recommends it
 containerd.io
 docker-buildx-plugin
 docker-compose-plugin
@@ -90,6 +91,7 @@ qt6-qtwayland
 xdg-terminal-exec
 
 # --- Media / imaging / OCR --------------------------------------------------
+openh264  # Cisco's, from its repository; replaces the noopenh264 stub
 ImageMagick
 ffmpegthumbnailer
 tesseract

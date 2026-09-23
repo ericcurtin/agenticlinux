@@ -60,6 +60,21 @@ else
   ls /boot >/dev/null
   docker run --rm hello-world
   as_test "podman run --rm quay.io/podman/hello"
+  # Rootless Docker as a user sets it up. The tool needs the user's systemd,
+  # which lingering starts (asynchronously, hence the start); --force because
+  # test can reach the rootful socket; no pager, which on an unknown TERM
+  # fails the tool's systemd check. hello-world comes from the rootful daemon,
+  # not a second pull. Uninstalling frees the memory for the agent turns and
+  # points the CLI back at the rootful daemon.
+  uid=$(id -u test)
+  loginctl enable-linger test
+  systemctl start "user@$uid.service"
+  runuser -l test -c "export XDG_RUNTIME_DIR=/run/user/$uid SYSTEMD_PAGER=
+    dockerd-rootless-setuptool.sh install --force &&
+    docker --context default save hello-world | docker --context rootless load -q &&
+    docker --context rootless run --rm --pull never hello-world &&
+    dockerd-rootless-setuptool.sh uninstall --force"
+  loginctl disable-linger test
 fi
 
 bootc status
