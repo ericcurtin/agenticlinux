@@ -64,25 +64,30 @@ fi
 
 bootc status
 for c in "sbx version" "llmman --version" "herdr --version" "opencode --version" \
-         "codex --version" "claude --version" "openclaw --version"; do
+         "codex --version" "claude --version" "openclaw --version" "codexbar --version"; do
   as_test "$c"
 done
 
-# The desktop apps (ChatGPT, OpenCode, Chrome): launcher, menu entry, and
-# every shared library of the binary resolved; without a display that is as
-# far as a check can go.
+# The desktop apps: launcher, menu entry, and every shared library of the
+# binary resolved; without a display that is as far as a check can go.
 while read -r bin entry exe; do
   test -x "/usr/bin/$bin"
   test -e "/usr/share/applications/$entry.desktop"
-  if ! libs=$(ldd "/usr/lib/$exe") || grep 'not found' <<<"$libs"; then
-    echo "/usr/lib/$exe: missing or unresolved libraries"
+  if ! libs=$(ldd "/usr/$exe") || grep 'not found' <<<"$libs"; then
+    echo "/usr/$exe: missing or unresolved libraries"
     exit 1
   fi
 done <<EOF
-chatgpt              chatgpt              chatgpt/ChatGPT
-opencode-desktop     ai.opencode.desktop  opencode-desktop/ai.opencode.desktop
-google-chrome-stable google-chrome        google-chrome/chrome
+chatgpt              chatgpt               lib/chatgpt/ChatGPT
+opencode-desktop     ai.opencode.desktop   lib/opencode-desktop/ai.opencode.desktop
+google-chrome-stable google-chrome         lib/google-chrome/chrome
+codexbar-linux       com.steipete.CodexBar bin/codexbar-linux
 EOF
+# Except CodexBar's, which starts offscreen as at login: wait for its socket,
+# check its Settings see autostart enabled, quit
+as_test "QT_QPA_PLATFORM=offscreen timeout 120 /usr/libexec/codexbar-autostart &
+  for i in \$(seq 60); do codexbar-linux --snapshot >/dev/null 2>&1 && break; sleep 1; done
+  codexbar-linux --autostart status | grep -q '\"enabled\":true' && codexbar-linux --quit && wait"
 
 # Agents on a local model through llmman. A turn that runs away (see above)
 # fails with the token limit, in about 10 minutes at the 7-8 tokens/s these

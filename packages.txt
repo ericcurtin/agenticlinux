@@ -83,6 +83,12 @@ libXScrnSaver
 libappindicator-gtk3
 xdg-utils
 
+# --- CodexBar's runtime (system Qt; Sign in opens a terminal) --------------
+qt6-qtdeclarative
+qt6-qtsvg
+qt6-qtwayland
+xdg-terminal-exec
+
 # --- Media / imaging / OCR --------------------------------------------------
 ImageMagick
 ffmpegthumbnailer

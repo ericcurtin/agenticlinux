@@ -206,6 +206,42 @@ find /usr/lib/.build-id -lname '*/opt/OpenCode/*' | while read -r l; do
   ln -sfn "$(readlink "$l" | sed 's|/opt/OpenCode/|/usr/lib/opencode-desktop/|')" "$l"
 done
 
+# CodexBar: a Swift CLI and a Qt tray app over it, from the newest stable
+# release whose Linux archives are all uploaded (that takes minutes after
+# publishing). The CLI finds its resource bundle beside its resolved path,
+# so its archive stays whole.
+cb_url=https://github.com/steipete/CodexBar/releases
+for cb in $(curl "$cb_url.atom" | grep -o 'releases/tag/v[0-9.]*"' | tr -d '"' | sed 's|.*/||'); do
+  files=$(echo CodexBar{CLI,Desktop}-"$cb-linux-$(uname -m)".tar.gz{,.sha256})
+  for f in $files; do
+    command curl -fsIL --retry 5 -o /dev/null "$cb_url/download/$cb/$f" || continue 2
+  done
+  break
+done
+mkdir -p /tmp/codexbar /usr/lib/codexbar
+(
+  cd /tmp/codexbar
+  for f in $files; do curl -O "$cb_url/download/$cb/$f"; done
+  sha256sum -c ./*.sha256
+  tar xzf CodexBarCLI-*.tar.gz -C /usr/lib/codexbar --no-same-owner
+  tar xzf CodexBarDesktop-*.tar.gz --strip-components=1 --no-same-owner
+)
+ln -sfn ../lib/codexbar/CodexBarCLI /usr/bin/codexbar
+install -m755 /tmp/codexbar/bin/codexbar-linux /usr/bin/codexbar-linux
+install -Dm644 /tmp/codexbar/Integrations/Linux/icon.svg /usr/share/icons/hicolor/scalable/apps/codexbar.svg
+install -Dm644 /tmp/codexbar/LICENSE /usr/share/licenses/codexbar/LICENSE
+install -d /etc/xdg/autostart
+cat > /etc/xdg/autostart/com.steipete.CodexBar.desktop <<EOF
+[Desktop Entry]
+Type=Application
+Name=CodexBar
+Exec=/usr/libexec/codexbar-autostart
+Icon=codexbar
+Terminal=false
+Hidden=false
+EOF
+/usr/bin/codexbar --version
+
 # --- Browser ----------------------------------------------------------------
 # Google Chrome from Google's repository (signed, one per architecture; the
 # RPM's %post would write the same file). Chrome installs into /opt like

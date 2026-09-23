@@ -1,0 +1,7 @@
+#!/bin/sh
+# Started from /etc/xdg/autostart until the user has an entry of their own,
+# the only one CodexBar's Settings see, so it is copied there first
+entry=com.steipete.CodexBar.desktop
+dir=${XDG_CONFIG_HOME:-$HOME/.config}/autostart
+[ -e "$dir/$entry" ] || { mkdir -p "$dir" && cp "/etc/xdg/autostart/$entry" "$dir/"; }
+exec /usr/bin/codexbar-linux --background
