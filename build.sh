@@ -53,15 +53,22 @@ read -r kv kr < <(rpm -q kernel --qf '%{VERSION} %{RELEASE}\n')
 # up a kernel the day it goes stable, while some mirrors still serve the
 # metadata from before (kernel-devel-7.2.6-200.fc44 was "No match" on one x86_64
 # build and found on the rest). The build systems keep every build, so the
-# package comes from there when the mirrors don't have it.
+# packages come from there when the mirrors don't have them. That is
+# kernel-devel-matched as well as kernel-devel: akmods requires the matched
+# one for the installed kernel, and a mirror can lack it too, including one
+# already past the kernel (7.2.7 in updates, 7.2.6 not yet in updates-archive).
 case "$DISTRO" in
   fedora)
     RPMFUSION=fedora NVIDIA=akmod-nvidia CUDA=xorg-x11-drv-nvidia-cuda ID_LIKE=fedora
-    if [ -n "$(dnf -q repoquery --available "kernel-devel-${KVER}")" ]; then
-      KDEVEL="kernel-devel-${KVER}"
-    else
-      KDEVEL="https://kojipkgs.fedoraproject.org/packages/kernel/${kv}/${kr}/$(uname -m)/kernel-devel-${KVER}.rpm"
-    fi
+    koji="https://kojipkgs.fedoraproject.org/packages/kernel/${kv}/${kr}/$(uname -m)"
+    KDEVEL=""
+    for p in kernel-devel kernel-devel-matched; do
+      if [ -n "$(dnf -q repoquery --available "${p}-${KVER}")" ]; then
+        KDEVEL="$KDEVEL ${p}-${KVER}"
+      else
+        KDEVEL="$KDEVEL $koji/${p}-${KVER}.rpm"
+      fi
+    done
     ;;
   centos)
     RPMFUSION=el NVIDIA=akmod-nvidia-580xx CUDA=xorg-x11-drv-nvidia-580xx-cuda ID_LIKE="rhel centos fedora"
