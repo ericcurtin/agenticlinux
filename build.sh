@@ -24,25 +24,6 @@ esac
 case "$VARIANT" in centos-*) want=centos ;; *) want=fedora ;; esac
 [ "$DISTRO" = "$want" ] || { echo "VARIANT '$VARIANT' needs a $want base image, not $DISTRO" >&2; exit 1; }
 
-KVER=$(rpm -q kernel --qf '%{VERSION}-%{RELEASE}.%{ARCH}')
-# What differs by distribution: RPM Fusion's branch, the NVIDIA driver (the
-# EL branch has it as a versioned stream), ID_LIKE, and where the kernel-devel
-# matching the kernel comes from. akmods requires it, and left to dnf the
-# repositories' newest comes with its kernel as a second one. CentOS Stream's
-# image is built ahead of its mirrors, so there it is fetched from the build
-# system, which keeps every build.
-case "$DISTRO" in
-  fedora)
-    RPMFUSION=fedora NVIDIA=akmod-nvidia CUDA=xorg-x11-drv-nvidia-cuda ID_LIKE=fedora
-    KDEVEL="kernel-devel-${KVER}"
-    ;;
-  centos)
-    RPMFUSION=el NVIDIA=akmod-nvidia-580xx CUDA=xorg-x11-drv-nvidia-580xx-cuda ID_LIKE="rhel centos fedora"
-    read -r kv kr < <(rpm -q kernel --qf '%{VERSION} %{RELEASE}\n')
-    koji="https://kojihub.stream.centos.org/kojifiles/packages/kernel/${kv}/${kr}/$(uname -m)"
-    KDEVEL="$koji/kernel-devel-${KVER}.rpm $koji/kernel-devel-matched-${KVER}.rpm"
-    ;;
-esac
 # /root is a dangling symlink to /var/roothome during the build
 export HOME=/tmp
 
@@ -61,6 +42,33 @@ dnf() {
     sleep 20
   done
 }
+
+KVER=$(rpm -q kernel --qf '%{VERSION}-%{RELEASE}.%{ARCH}')
+read -r kv kr < <(rpm -q kernel --qf '%{VERSION} %{RELEASE}\n')
+# What differs by distribution: RPM Fusion's branch, the NVIDIA driver (the
+# EL branch has it as a versioned stream), ID_LIKE, and where the kernel-devel
+# matching the kernel comes from. akmods requires it, and left to dnf the
+# repositories' newest comes with its kernel as a second one. Both images can
+# be built ahead of the mirrors: CentOS Stream's always is, and Fedora's picks
+# up a kernel the day it goes stable, while some mirrors still serve the
+# metadata from before (kernel-devel-7.2.6-200.fc44 was "No match" on one x86_64
+# build and found on the rest). The build systems keep every build, so the
+# package comes from there when the mirrors don't have it.
+case "$DISTRO" in
+  fedora)
+    RPMFUSION=fedora NVIDIA=akmod-nvidia CUDA=xorg-x11-drv-nvidia-cuda ID_LIKE=fedora
+    if [ -n "$(dnf -q repoquery --available "kernel-devel-${KVER}")" ]; then
+      KDEVEL="kernel-devel-${KVER}"
+    else
+      KDEVEL="https://kojipkgs.fedoraproject.org/packages/kernel/${kv}/${kr}/$(uname -m)/kernel-devel-${KVER}.rpm"
+    fi
+    ;;
+  centos)
+    RPMFUSION=el NVIDIA=akmod-nvidia-580xx CUDA=xorg-x11-drv-nvidia-580xx-cuda ID_LIKE="rhel centos fedora"
+    koji="https://kojihub.stream.centos.org/kojifiles/packages/kernel/${kv}/${kr}/$(uname -m)"
+    KDEVEL="$koji/kernel-devel-${KVER}.rpm $koji/kernel-devel-matched-${KVER}.rpm"
+    ;;
+esac
 
 # --- Repositories -----------------------------------------------------------
 # CentOS: EPEL for the desktops beyond GNOME and most of the tools, CRB for
