@@ -121,8 +121,20 @@ jobs:
           sudo chmod a+rw /dev/kvm
       - if: runner.arch == 'X64'
         name: Install into a qcow2
-        # bootc reads the image straight from the OCI layout and writes to the
-        # qcow2 through qemu-nbd. no_timer_check: the kernel's IO-APIC timer
+        # A normal install takes 8-15 minutes; this bounds one that hangs
+        # past its own timeout below (two attempts, plus the save and pull)
+        timeout-minutes: 90
+        # bootc reads the image straight from the OCI layout and writes to a
+        # sparse raw file through a loop device, which is then converted to
+        # the qcow2 the later steps boot and hand on. No qemu-nbd: with it the
+        # kernel's writeback of the target filesystem waits on a userspace
+        # process that is itself writing to the host's disk, and the install
+        # has hung there (gnome, 57 minutes in a step that takes 8-15, until
+        # the runner stopped answering: "the hosted runner lost communication
+        # with the server", no log kept). The loop driver does that writeback
+        # inside the kernel, exempt from the dirty-page throttling that lets
+        # the nbd server stall behind the very pages it is meant to write.
+        # no_timer_check: the kernel's IO-APIC timer
         # sanity test wants five PIT ticks within a short delay run before the
         # TSC is calibrated, and a loaded HVF host has missed that and panicked
         # 16 ms into boot (the kernel skips the test itself on every hypervisor
@@ -135,50 +147,62 @@ jobs:
           mkdir oci && docker save agenticlinux:smoke | tar x -C oci
           # The image is in the artifact and in oci now. Everything Docker
           # still holds (the loaded image, its unpacked snapshots, the smoke
-          # build's cache) shares the disk with the qcow2, which grows by the
-          # whole installed system as bootc writes it through qemu-nbd.
+          # build's cache) shares the disk with the raw file, which grows by
+          # the whole installed system as bootc writes it.
           docker system prune -af
           df -h /
           # Patient retries, as in build.sh: quay.io has answered 502 mid-pull,
           # and docker run's own implicit pull is a single attempt
           for i in $(seq 12); do docker pull "$BOOTC" && break || sleep 20; done
-          sudo modprobe nbd max_part=16
           install_disk() {
-            qemu-img create -f qcow2 disk.qcow2 60G
-            sudo qemu-nbd --fork -c /dev/nbd0 disk.qcow2
+            rm -f disk.raw
+            truncate -s 60G disk.raw
             local status=0
-            docker run --rm --privileged --pid=host -v /dev:/dev -v "$PWD/oci:/oci:ro" \
+            # docker run passes timeout's SIGTERM on to bootc; a container
+            # that outlives it is removed below
+            timeout -k 2m 30m docker run --rm --name bootc-install --privileged --pid=host \
+              -v /dev:/dev -v "$PWD/oci:/oci:ro" -v "$PWD/disk.raw:/disk.raw" \
               -v "$PWD/usr/lib/bootc/install:/usr/lib/bootc/install:ro" \
               "$BOOTC" \
-              bootc install to-disk --source-imgref oci:/oci \
+              bootc install to-disk --via-loopback --source-imgref oci:/oci \
               --target-imgref "$IMAGE:$VARIANT" --generic-image --skip-fetch-check \
               --karg systemd.run=/usr/bin/smoke-vm --karg systemd.run_success_action=poweroff \
               --karg systemd.run_failure_action=poweroff --karg console=ttyS0 --karg console=ttyAMA0 \
               --karg no_timer_check \
-              /dev/nbd0 || status=$?
+              /disk.raw || status=$?
             if [ "$status" -ne 0 ]; then
-              # What the failure looked like from each side of the nbd
-              # device: the host's disk, the kernel's view of nbd and xfs,
-              # and how full the target filesystem actually was
+              [ "$status" -ne 124 ] || echo "the install did not finish within 30 minutes"
+              docker rm -f bootc-install >/dev/null 2>&1 || true
+              # What the failure looked like from each side of the loop
+              # device: the host's disk, the kernel's view of loop and xfs
+              # (and of any task stuck on them), and how full the target
+              # filesystem actually was
               df -h /
-              sudo dmesg | grep -iE 'nbd|xfs|i/o error' | tail -n 30 || true
-              sudo mkdir -p /mnt/target
-              sudo mount -o ro,norecovery /dev/nbd0p3 /mnt/target && df -h /mnt/target &&
-                sudo umount /mnt/target || true
+              sudo dmesg | grep -iE 'loop|xfs|i/o error|blocked for more' | tail -n 30 || true
+              for dev in $(sudo losetup --list -n -O NAME -j disk.raw); do
+                sudo losetup -d "$dev" || true
+              done
+              if dev=$(sudo losetup -P --find --show disk.raw); then
+                sudo mkdir -p /mnt/target
+                sudo mount -o ro,norecovery "${dev}p3" /mnt/target && df -h /mnt/target &&
+                  sudo umount /mnt/target || true
+                sudo losetup -d "$dev" || true
+              fi
             fi
-            sudo qemu-nbd -d /dev/nbd0
             return "$status"
           }
           # The install has failed with "No space left on device" from the
           # target filesystem four minutes in, for an image that installs
           # into well under half of the 60 GB disk, while the same step passed
           # for larger variants in the same run and for the same variant in
-          # the runs around it. Nothing about it is deterministic, so a failed
+          # the runs around it (through qemu-nbd, as was the hang above).
+          # Nothing about it is deterministic, so a failed or timed-out
           # install is retried once on a fresh disk after the diagnostics.
-          if ! install_disk; then
-            rm -f disk.qcow2
-            install_disk
-          fi
+          install_disk || install_disk
+          # bootc trimmed the filesystem, so the raw file is sparse; the
+          # conversion skips its holes
+          qemu-img convert -O qcow2 disk.raw disk.qcow2
+          rm disk.raw
           sudo rm -rf oci
           df -h /
       - if: runner.arch == 'X64'
