@@ -12,6 +12,9 @@ env:
   FEDORA: 44
   CENTOS: 10
   REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+  # Docker's overlay2 store refuses images of over 125 layers ("max depth
+  # exceeded"); this leaves 25 for images built on ours
+  LAYER_LIMIT: 100
 
 # A newer push supersedes whatever is running: nothing is published until the
 # whole run is green, so a half-finished run of an older commit has no value,
@@ -55,7 +58,8 @@ jobs:
 
   # Build each variant natively and run the smoke test in a container of it;
   # on x86_64 also install it into a qcow2 and boot it under KVM for the full
-  # test. Nothing is pushed yet; the image is handed on as an artifact.
+  # test. Nothing is pushed yet; the image (the Dockerfile's chunked target,
+  # an OCI layout) is handed on as an artifact.
   build:
     needs: setup
     timeout-minutes: 240
@@ -68,7 +72,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Free disk space, use the containerd image store
-        # overlay2 refuses images with more than ~125 layers; Fedora's have more
+        # overlay2's docker load doesn't take an OCI layout
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache /usr/local/.ghcup /usr/share/swift
           docker system prune -af
@@ -79,12 +83,17 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
+          target: chunked
           build-args: |
             BASE=${{ fromJSON(needs.setup.outputs.bases)[matrix.variant] }}
+            RECHUNKER=quay.io/fedora/fedora-bootc:${{ env.FEDORA }}
             VARIANT=${{ matrix.variant }}
+            VERSION=${{ needs.setup.outputs.tag }}
             REPO_URL=${{ env.REPO_URL }}
-          tags: agenticlinux:${{ matrix.variant }}
-          outputs: type=docker,dest=${{ runner.temp }}/image.tar
+          # Attestations would land in the OCI layout as stray files
+          provenance: false
+          sbom: false
+          outputs: type=tar,dest=${{ runner.temp }}/image.tar
       # The checksum lets the push job tell a lost download from a bad image
       - run: cd "$RUNNER_TEMP" && sha256sum image.tar > image.tar.sha256
       - uses: actions/upload-artifact@v4
@@ -101,6 +110,12 @@ jobs:
         run: |
           docker load -i "$RUNNER_TEMP/image.tar"
           rm "$RUNNER_TEMP/image.tar"
+          layers=$(docker image inspect --format '{{len .RootFS.Layers}}' "agenticlinux:$VARIANT")
+          echo "$layers layers"
+          if [ "$layers" -gt "$LAYER_LIMIT" ]; then
+            echo "::error::agenticlinux:$VARIANT has $layers layers, more than $LAYER_LIMIT"
+            exit 1
+          fi
           docker buildx prune -af
           docker build -f test/Dockerfile --build-arg "IMAGE=agenticlinux:$VARIANT" -t agenticlinux:smoke .
           docker run --rm agenticlinux:smoke smoke-vm

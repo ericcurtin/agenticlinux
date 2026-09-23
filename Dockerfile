@@ -10,9 +10,19 @@
 #     quay.io/centos-bootc/centos-bootc:stream10 (the desktop is installed
 #     by build.sh; CentOS has no desktop images)
 # REPO_URL is the project's home: the OS identity files point at it and the
-# logo is downloaded from its release assets.
+# logo is downloaded from its release assets. VERSION is the version bootc
+# status shows.
+#
+# The default target has over 250 layers, too many for Docker's overlay2
+# store. The published one is the chunked target, the same image repacked
+# (rechunk.sh) as an OCI layout:
+#   docker build --target chunked -o type=tar,dest=image.tar . &&
+#     docker load -i image.tar
 ARG BASE=quay.io/fedora-ostree-desktops/base-atomic:44
-FROM ${BASE}
+# rpm-ostree for the repacking; CentOS's hangs in a container build
+ARG RECHUNKER=quay.io/fedora/fedora-bootc:44
+
+FROM ${BASE} AS image
 ARG VARIANT=base
 ARG REPO_URL=https://github.com/ericcurtin/agenticlinux
 
@@ -21,3 +31,15 @@ COPY packages.txt build.sh /tmp/
 RUN VARIANT="$VARIANT" REPO_URL="$REPO_URL" /tmp/build.sh
 
 RUN bootc container lint
+
+FROM ${RECHUNKER} AS rechunk
+ARG VARIANT=base
+ARG VERSION=
+RUN --mount=type=bind,from=image,target=/rootfs \
+    --mount=type=bind,source=rechunk.sh,target=/tmp/rechunk.sh \
+    VARIANT="$VARIANT" VERSION="$VERSION" /tmp/rechunk.sh
+
+FROM scratch AS chunked
+COPY --from=rechunk /out /
+
+FROM image
