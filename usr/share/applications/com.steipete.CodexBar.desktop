@@ -1,0 +1,18 @@
+[Desktop Entry]
+Type=Application
+Name=CodexBar
+Comment=AI usage, accounts and local spending
+Exec=/usr/bin/codexbar-linux --usage
+Icon=codexbar
+Terminal=false
+Categories=Utility;Development;
+StartupWMClass=com.steipete.CodexBar
+Actions=Settings;Spending;
+
+[Desktop Action Settings]
+Name=Settings
+Exec=/usr/bin/codexbar-linux --settings
+
+[Desktop Action Spending]
+Name=Usage & Spend
+Exec=/usr/bin/codexbar-linux --spending

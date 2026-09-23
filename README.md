@@ -6,7 +6,8 @@
 
 A Linux desktop built for working with AI agents. Everything is there on
 first boot: the `claude`, `codex`, `opencode` and `openclaw` agents,
-[herdr](https://herdr.dev) to run them side by side, the
+[herdr](https://herdr.dev) to run them side by side,
+[CodexBar](https://codex.bar) to keep an eye on their usage limits, the
 [ChatGPT](https://learn.chatgpt.com/docs/app) (with Codex) and
 [OpenCode](https://opencode.ai) desktop apps, Google Chrome,
 [llmman](https://github.com/llmmanorg/llmman) to run models locally or connect
@@ -74,6 +75,10 @@ and start from the applications menu or as `chatgpt` and `opencode-desktop`:
   "Codex" mode inside it). Its Linux build is a preview.
 - **OpenCode**: relocated from `/opt` to `/usr/lib` so it is part of the
   image rather than of the machine's first install.
+
+**CodexBar** shows the agents' usage limits and spend in the tray, or with
+`codexbar usage` in a terminal. It starts at login (see its Settings); GNOME
+needs a tray extension for the icon.
 
 The apps live in the read-only `/usr`, so nothing in them can update itself
 in place: they are updated with the image, like everything else.
