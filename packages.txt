@@ -50,6 +50,7 @@ inotify-tools
 fastfetch
 btop
 neovim
+vim-enhanced  # the full vim (the vim command), not vim-minimal's vi
 tldr
 
 # --- Development ------------------------------------------------------------
