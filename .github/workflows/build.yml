@@ -260,28 +260,13 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: vm-${{ matrix.variant }}
-      - name: Verify the disk arrived intact
+          path: vm-${{ matrix.variant }}
+      - name: Verify the download
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           VARIANT: ${{ matrix.variant }}
-        # download-artifact has returned success having written nothing (an
-        # 8.7 GB artifact on a macOS runner: "Starting download", then the
-        # step ended), so the download is checked and redone with gh when it
-        # did not arrive. macOS has no sha256sum; shasum reads the same format.
-        run: |
-          verify() {
-            [ -e disk.qcow2.sha256 ] || return 1
-            if command -v sha256sum >/dev/null; then sha256sum -c disk.qcow2.sha256
-            else shasum -a 256 -c disk.qcow2.sha256; fi
-          }
-          for i in 1 2 3; do
-            verify && exit 0
-            echo "attempt $i: the disk did not arrive intact, downloading it again"
-            rm -f disk.qcow2 disk.qcow2.sha256
-            gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" -n "vm-$VARIANT" || true
-          done
-          verify
+        run: test/fetch-artifact.sh "vm-$VARIANT"
       - if: runner.os == 'macOS'
         run: brew install qemu
       - if: runner.os == 'Windows'
@@ -292,7 +277,8 @@ jobs:
       - shell: bash
         env:
           SMOKE_INFERENCE: ${{ runner.os != 'macOS' && '1' || '0' }}
-        run: test/smoke.sh disk.qcow2 x86_64
+          VARIANT: ${{ matrix.variant }}
+        run: test/smoke.sh "vm-$VARIANT/disk.qcow2" x86_64
       # The step above prints only the tail of the guest's console; smoke.sh
       # keeps one console and one qemu stderr log per boot attempt
       - if: failure()
@@ -321,31 +307,15 @@ jobs:
           docker system prune -af
           echo '{"features": {"containerd-snapshotter": true}}' | sudo tee /etc/docker/daemon.json
           sudo systemctl restart docker
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           pattern: image-${{ matrix.variant }}-*
-      - name: Verify the images arrived intact
+      - name: Verify the download
         env:
           GH_TOKEN: ${{ github.token }}
           VARIANT: ${{ matrix.variant }}
-        # download-artifact has returned success with one of the two images
-        # truncated (the 8.8 GB x86_64 one: "Starting download", then the
-        # step ended without its digest line, and docker load hit an
-        # unexpected EOF), as it has with the smoke jobs' disks. Check each
-        # image against the checksum its build job wrote and fetch the
-        # artifact again with gh when it did not arrive.
-        run: |
-          for arch in X64 ARM64; do
-            dir="image-$VARIANT-$arch"
-            verify() { [ -e "$dir/image.tar.sha256" ] && (cd "$dir" && sha256sum -c image.tar.sha256); }
-            for i in 1 2 3; do
-              verify && continue 2
-              echo "attempt $i: $dir did not arrive intact, downloading it again"
-              rm -rf "$dir"
-              gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" -n "$dir" -D "$dir" || true
-            done
-            verify
-          done
+        run: for arch in X64 ARM64; do test/fetch-artifact.sh "image-$VARIANT-$arch"; done
       - uses: docker/login-action@v3
         with:
           username: ${{ vars.DOCKER_HUB_USER }}
