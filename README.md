@@ -14,7 +14,8 @@ first boot: the `claude`, `codex`, `opencode` and `openclaw` agents,
 any agent to any provider, [Docker Engine](https://docs.docker.com/engine/)
 (rootful and [rootless](https://docs.docker.com/engine/security/rootless/)) and
 [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) to run agents in
-isolation, GPU runtimes for Vulkan, ROCm and NVIDIA/CUDA, and a full developer
+isolation, [QEMU](https://www.qemu.org) with KVM for full virtual machines,
+GPU runtimes for Vulkan, ROCm and NVIDIA/CUDA, and a full developer
 toolset.
 
 AgenticLinux is a [bootc](https://bootc-dev.github.io/bootc/) image: the whole
