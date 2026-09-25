@@ -23,9 +23,6 @@ jobs:
           ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
           LOST: lost communication with the server|received a shutdown signal
         run: |
-          # Build's concurrency group would cancel a newer run for this re-run
-          latest=$(gh run list --workflow build.yml --limit 1 --json databaseId --jq '.[0].databaseId')
-          [ "$latest" = "$RUN" ] || { echo "superseded by run $latest"; exit 0; }
           jobs=$(gh api --paginate "repos/$GH_REPO/actions/runs/$RUN/attempts/$ATTEMPT/jobs?per_page=100" \
             --jq '.jobs[] | select(.conclusion == "failure") | "\(.id)\t\(.name)"')
           [ -n "$jobs" ] || exit 0
@@ -39,4 +36,7 @@ jobs:
               exit 0
             fi
           done <<<"$jobs"
+          # Build's concurrency group would cancel a newer run for this re-run
+          latest=$(gh run list --workflow build.yml --limit 1 --json databaseId --jq '.[0].databaseId')
+          [ "$latest" = "$RUN" ] || { echo "superseded by run $latest"; exit 0; }
           gh run rerun "$RUN" --failed
