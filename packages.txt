@@ -13,6 +13,10 @@ docker-compose-plugin
 distrobox
 toolbox
 
+# --- Virtual machines (KVM, the host's architecture) ------------------------
+qemu-kvm  # /usr/bin/qemu-kvm on Fedora, /usr/libexec/qemu-kvm on CentOS
+qemu-img
+
 # --- GPU (ROCm and the NVIDIA driver are handled in build.sh) ---------------
 vulkan-loader
 vulkan-tools

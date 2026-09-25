@@ -79,7 +79,8 @@ fi
 
 bootc status
 for c in "sbx version" "llmman --version" "herdr --version" "opencode --version" \
-         "codex --version" "claude --version" "openclaw --version" "codexbar --version"; do
+         "codex --version" "claude --version" "openclaw --version" "codexbar --version" \
+         "qemu-img --version"; do
   as_test "$c"
 done
 
