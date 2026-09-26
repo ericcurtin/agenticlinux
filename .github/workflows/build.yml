@@ -156,6 +156,14 @@ jobs:
         # TSC is calibrated, and a loaded HVF host has missed that and panicked
         # 16 ms into boot (the kernel skips the test itself on every hypervisor
         # it recognizes, KVM, Hyper-V and VMware, but sees HVF as bare metal).
+        # nousershstk: some Azure hosts' Hyper-V advertises CET shadow stacks
+        # in CPUID under WHPX but no XSAVES support for their state. The
+        # kernel (6.12 at least) enables user shadow stacks on the CPUID bit
+        # alone, glibc turns them on for the first CET-marked daemon, and the
+        # CET MSRs, no longer part of the saved state, are never switched:
+        # every later task on that vCPU ran on fwupd's shadow stack and
+        # segfaulted, llama-server and journald included, and the test hung
+        # until the host's two-hour timeout (centos-kde, Windows).
         # The installer runs from the distribution's own bootc image.
         env:
           VARIANT: ${{ matrix.variant }}
@@ -185,7 +193,7 @@ jobs:
               --target-imgref "$IMAGE:$VARIANT" --generic-image --skip-fetch-check \
               --karg systemd.run=/usr/bin/smoke-vm --karg systemd.run_success_action=poweroff \
               --karg systemd.run_failure_action=poweroff --karg console=ttyS0 --karg console=ttyAMA0 \
-              --karg no_timer_check \
+              --karg no_timer_check --karg nousershstk \
               /disk.raw || status=$?
             if [ "$status" -ne 0 ]; then
               [ "$status" -ne 124 ] || echo "the install did not finish within 30 minutes"
