@@ -130,6 +130,14 @@ curl -o /tmp/docker-sbx.rpm \
 # shellcheck disable=SC2046,SC2086
 dnf -y install $(sed 's/#.*//' /tmp/packages.txt) $KDEVEL /tmp/docker-sbx.rpm
 
+# vim is the editor; the base images also have nano. Fedora's makes it EDITOR
+# with nano-default-editor, which vim-default-editor replaces. CentOS has
+# neither, so EDITOR stays unset there and tools fall back to vi.
+if rpm -q nano-default-editor >/dev/null; then
+  dnf -y swap nano-default-editor vim-default-editor
+fi
+if rpm -q nano >/dev/null; then dnf -y remove nano; fi
+
 # ROCm is x86_64 only, in Fedora and in EPEL (which has no OpenCL packages)
 if [ "$(uname -m)" = x86_64 ]; then
   rocm="rocm-hip rocm-runtime rocm-smi rocminfo rocblas hipblas hipblaslt rccl"
