@@ -114,6 +114,27 @@ as_test "QT_QPA_PLATFORM=offscreen timeout 120 /usr/libexec/codexbar-autostart &
 # the arm64 runners, nearly all of it prompt processing of its 20k-token
 # system prompt.
 if [ "$inference" != 0 ]; then
+  # In a container llmman downloads llama.cpp itself (LLMMAN_RUNTIME=bin
+  # above) and looks the release up through GitHub's REST API with no token:
+  # 60 requests an hour per IP address, shared by every job behind the
+  # runner's address. That has answered 403 Forbidden to all three tries of
+  # the first agent turn within three minutes (sway, arm64), and a daemon
+  # whose fetch failed repeats it on every load. Fetch it once here, before
+  # the daemon starts, and when the limit is spent wait for the reset GitHub
+  # reports (asking /rate_limit does not count against it) instead of
+  # retrying into the same hour. Once the pinned release is cached llmman
+  # does not ask again.
+  if systemd-detect-virt -cq; then
+    for i in 1 2 3; do
+      as_test "llmman serve --pull-only" && break
+      [ "$i" -lt 3 ] || exit 1
+      delay=$(curl -fsS --retry 3 https://api.github.com/rate_limit | jq '.resources.core |
+        if .remaining > 0 then 30 else [[.reset - now + 10, 10] | max, 3700] | min | floor end') ||
+        delay=60
+      echo "fetching llama.cpp again in $delay s"
+      sleep "$delay"
+    done
+  fi
   # Three tries, as for the agents' turns below: the pull is a chain of
   # registry requests through the host's network and has timed out on one
   as_test "llmman pull qwen3.5:0.8b" || as_test "llmman pull qwen3.5:0.8b" ||
