@@ -69,6 +69,21 @@ what CentOS Stream 10, EPEL 10 and RPM Fusion have: GNOME and KDE Plasma are
 the desktops that exist there. CentOS Stream's kernel tracks the next RHEL
 10 minor release.
 
+## Signing in to the agents
+
+On a local model, through `llmman launch`, the agents need no account.
+Otherwise sign in once per agent:
+
+- `claude`: log in in the browser on first run, or set `ANTHROPIC_API_KEY`.
+- `codex`: `codex login`, or `printenv OPENAI_API_KEY | codex login --with-api-key`.
+- `opencode`: `/connect` in its TUI.
+- `openclaw`: `openclaw onboard`.
+- `llmman`: export the provider's key (`OPENROUTER_API_KEY`, ...) before
+  `llmman launch --provider ...`; `llmman providers` shows which are set.
+
+The ChatGPT app asks you to sign in when it first starts. Credentials stay in
+your home directory, which [updates](#updates) leave alone.
+
 ## Desktop apps
 
 The desktop apps of the agents that publish an RPM are installed from it,
@@ -119,6 +134,41 @@ sudo bootc switch docker.io/ericcurtin044/agenticlinux:kde
 The root filesystem (which holds `/var`, `/home` and `/root`) defaults to xfs
 for both `bootc install` and the ISO.
 
+The images are not signed: pulling one, from the ISO or `bootc switch`, relies
+on Docker Hub over HTTPS.
+
+## Updates
+
+The whole OS is one image, rebuilt every Monday and on every push to `main`;
+the variant's tag (`kde`) is the newest. `/etc` and `/var` (so your home
+directory) carry over between images.
+
+```sh
+bootc status                # running, staged and rollback images
+sudo bootc upgrade          # fetch the newest image, boot into it next time
+sudo bootc upgrade --apply  # the same, and reboot now
+sudo bootc rollback         # boot the previous image next time; again to undo
+```
+
+`/var` is shared by both images, so a rollback does not undo changes to your
+data.
+
+Every build is also tagged `<variant>-<version>`, the name of a
+[release](https://github.com/ericcurtin/agenticlinux/releases). Switch to one
+to pin it, and back to the variant's tag to follow the newest:
+
+```sh
+sudo bootc switch docker.io/ericcurtin044/agenticlinux:kde-44.YYYYMMDD.N
+```
+
+Nothing updates on its own by default. bootc's timer checks an hour after boot
+and about every eight hours after that, and reboots as soon as it finds a new
+image:
+
+```sh
+sudo systemctl enable --now bootc-fetch-apply-updates.timer
+```
+
 ## GPUs
 
 - Vulkan: Mesa drivers and `vulkaninfo`.
@@ -135,3 +185,39 @@ for both `bootc install` and the ISO.
   Fusion's EL10 build, the 580 series. On aarch64 the driver is best effort:
   when RPM Fusion's aarch64 build is broken the image is published without
   it (and with nouveau), see [build.sh](build.sh).
+
+## Building
+
+[packages.txt](packages.txt) lists the RPMs, [build.sh](build.sh) does the
+rest, and `usr/` is copied over the image. Each variant's base image is at the
+top of the [Dockerfile](Dockerfile); `VARIANT` must match its distribution. The
+published image is the `chunked` target, an OCI layout that Docker only loads
+with the containerd image store. Enable it in `/etc/docker/daemon.json`:
+
+```json
+{"features": {"containerd-snapshotter": true}}
+```
+
+Then:
+
+```sh
+docker build --target chunked \
+  --build-arg BASE=quay.io/fedora-ostree-desktops/kinoite:44 --build-arg VARIANT=kde \
+  -o type=tar,dest=image.tar .
+docker load -i image.tar   # loads it as agenticlinux:kde
+```
+
+The smoke test runs in a container of the image; it pulls a small local model
+and runs each agent on it, so it takes a while:
+
+```sh
+docker build -f test/Dockerfile --build-arg IMAGE=agenticlinux:kde -t agenticlinux:smoke .
+docker run --rm agenticlinux:smoke smoke-vm
+```
+
+CI also boots each x86_64 image in `qemu` with [test/smoke.sh](test/smoke.sh),
+which covers what needs a real boot: Docker (rootful and rootless) and podman.
+[build.yml](.github/workflows/build.yml) publishes only if every variant passes
+on both architectures. A fork needs the `DOCKER_HUB_USER` variable, the
+`DOCKER_HUB_PAT` secret, and an `assets` release with the logo files, which
+`build.sh` downloads from `REPO_URL`.
