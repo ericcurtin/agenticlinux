@@ -1,0 +1,27 @@
+# Local builds and test runs (README "Building", test/, iso/build.sh)
+/image.tar
+/image.tar.sha256
+/oci/
+/disk.raw
+/disk.qcow2
+/disk.qcow2.sha256
+/vm.qcow2
+/firmware.fd
+/serial.*.log
+/qemu.*.log
+
+# Unpacked CI artifacts (test/fetch-artifact.sh)
+/image-*/
+/vm-*/
+
+# ISOs and the scratch files iso/build.sh leaves when it fails
+/*.iso
+/*.iso.sha256
+/agenticlinux.ks
+/updates/
+/images/
+
+# Editors and macOS
+*.swp
+*~
+.DS_Store
