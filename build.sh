@@ -116,9 +116,19 @@ if [ "$DISTRO" = centos ]; then
     *)            groups="" ;;
   esac
   if [ -n "$groups" ]; then
+    # vlc-plugins-freeworld (RPM Fusion, in the multimedia group) is built
+    # against each VLC release the day it comes out, and EPEL's VLC follows
+    # days to weeks later. In between it requires a vlc-libs nothing
+    # provides. GNOME's transaction just drops it, but with kde-desktop,
+    # whose vlc-plugin-gstreamer needs EPEL's older vlc-libs, nothing
+    # resolves, however often it is retried. So it stays out of the groups
+    # and is installed afterwards when the repositories agree again.
     # shellcheck disable=SC2086
-    dnf -y group install base-graphical fonts input-methods multimedia hardware-support \
+    dnf -y group install --exclude=vlc-plugins-freeworld \
+      base-graphical fonts input-methods multimedia hardware-support \
       guest-desktop-agents networkmanager-submodules desktop-accessibility $groups
+    dnf -y install vlc-plugins-freeworld ||
+      echo "WARNING: vlc-plugins-freeworld does not match EPEL's VLC yet, building without it" >&2
   fi
 fi
 
