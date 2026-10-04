@@ -33,10 +33,21 @@ curl() { command curl -fsSL --retry 12 --retry-delay 20 --retry-all-errors "$@";
 # on a single-host repository (nvidia.github.io fed one package at under 1000
 # bytes/s for 30 s, four times in a row) fails the transaction. Nothing is
 # installed until every package has downloaded, so re-running is safe.
+#
+# On CentOS, RPM Fusion's vlc-plugins-freeworld is never installed. It is
+# built against each VLC release the day it comes out, and EPEL's VLC follows
+# days to weeks later; in between it requires a vlc-libs nothing provides. The
+# multimedia group names it, and with kde-desktop, whose vlc-plugin-gstreamer
+# needs EPEL's older vlc-libs, the transaction fails however often it is
+# retried. It also supplements vlc-plugins-base, so when EPEL does catch up
+# any transaction would pull it in: excluded from every call, the image is the
+# same whichever repository is ahead. VLC itself, from EPEL alone, stays.
+exclude=()
+[ "$DISTRO" != centos ] || exclude=(--exclude=vlc-plugins-freeworld)
 dnf() {
   local i
   for i in $(seq 12); do
-    command dnf "$@" && return
+    command dnf "${exclude[@]}" "$@" && return
     [ "$i" -lt 12 ] || return 1
     echo "dnf failed, retrying in 20 s ($i/12)" >&2
     sleep 20
@@ -116,19 +127,9 @@ if [ "$DISTRO" = centos ]; then
     *)            groups="" ;;
   esac
   if [ -n "$groups" ]; then
-    # vlc-plugins-freeworld (RPM Fusion, in the multimedia group) is built
-    # against each VLC release the day it comes out, and EPEL's VLC follows
-    # days to weeks later. In between it requires a vlc-libs nothing
-    # provides. GNOME's transaction just drops it, but with kde-desktop,
-    # whose vlc-plugin-gstreamer needs EPEL's older vlc-libs, nothing
-    # resolves, however often it is retried. So it stays out of the groups
-    # and is installed afterwards when the repositories agree again.
     # shellcheck disable=SC2086
-    dnf -y group install --exclude=vlc-plugins-freeworld \
-      base-graphical fonts input-methods multimedia hardware-support \
+    dnf -y group install base-graphical fonts input-methods multimedia hardware-support \
       guest-desktop-agents networkmanager-submodules desktop-accessibility $groups
-    dnf -y install vlc-plugins-freeworld ||
-      echo "WARNING: vlc-plugins-freeworld does not match EPEL's VLC yet, building without it" >&2
   fi
 fi
 
