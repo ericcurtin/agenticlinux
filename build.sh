@@ -33,10 +33,18 @@ curl() { command curl -fsSL --retry 12 --retry-delay 20 --retry-all-errors "$@";
 # on a single-host repository (nvidia.github.io fed one package at under 1000
 # bytes/s for 30 s, four times in a row) fails the transaction. Nothing is
 # installed until every package has downloaded, so re-running is safe.
+#
+# RPM Fusion's vlc-plugins-freeworld is never installed. It is built against
+# each VLC release the day it comes out and EPEL's VLC follows days to weeks
+# later, and in between it requires a vlc-libs nothing provides. CentOS's
+# multimedia group names it, and with kde-desktop the transaction then fails
+# however often it is retried. It also supplements vlc-plugins-base, so once
+# EPEL catches up any transaction would pull it in: it is excluded from all of
+# them, and the image is the same whichever repository is ahead.
 dnf() {
   local i
   for i in $(seq 12); do
-    command dnf "$@" && return
+    command dnf --exclude=vlc-plugins-freeworld "$@" && return
     [ "$i" -lt 12 ] || return 1
     echo "dnf failed, retrying in 20 s ($i/12)" >&2
     sleep 20
