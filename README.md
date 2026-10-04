@@ -5,11 +5,12 @@
 <h1 align="center">AgenticLinux</h1>
 
 A Linux desktop built for working with AI agents. Everything is there on
-first boot: the `claude`, `codex`, `opencode` and `openclaw` agents,
+first boot: the `claude`, `codex`, `opencode`, `openclaw` and `goose` agents,
 [herdr](https://herdr.dev) to run them side by side,
 [CodexBar](https://codex.bar) to keep an eye on their usage limits, the
-[ChatGPT](https://learn.chatgpt.com/docs/app) (with Codex) and
-[OpenCode](https://opencode.ai) desktop apps, Google Chrome,
+[ChatGPT](https://learn.chatgpt.com/docs/app) (with Codex),
+[OpenCode](https://opencode.ai) and [Goose](https://goose-docs.ai) desktop
+apps, Google Chrome,
 [llmman](https://github.com/llmmanorg/llmman) to run models locally or connect
 any agent to any provider, [Docker Engine](https://docs.docker.com/engine/)
 (rootful and [rootless](https://docs.docker.com/engine/security/rootless/)) and
@@ -78,6 +79,7 @@ Otherwise sign in once per agent:
 - `codex`: `codex login`, or `printenv OPENAI_API_KEY | codex login --with-api-key`.
 - `opencode`: `/connect` in its TUI.
 - `openclaw`: `openclaw onboard`.
+- `goose`: `goose configure`.
 - `llmman`: export the provider's key (`OPENROUTER_API_KEY`, ...) before
   `llmman launch --provider ...`; `llmman providers` shows which are set.
 
@@ -87,12 +89,16 @@ your home directory, which [updates](#updates) leave alone.
 ## Desktop apps
 
 The desktop apps of the agents that publish an RPM are installed from it,
-and start from the applications menu or as `chatgpt` and `opencode-desktop`:
+and start from the applications menu or as `chatgpt`, `opencode-desktop` and
+`goose-desktop`:
 
 - **ChatGPT**: OpenAI's one desktop app, which is also the Codex app (the
   "Codex" mode inside it). Its Linux build is a preview.
 - **OpenCode**: relocated from `/opt` to `/usr/lib` so it is part of the
   image rather than of the machine's first install.
+- **Goose**: its RPM installs under `/usr/lib` and carries the `goose`
+  CLI, which `/usr/bin/goose` links to, so the CLI and the app are always
+  the same version.
 
 **CodexBar** shows the agents' usage limits and spend in the tray, or with
 `codexbar usage` in a terminal. It starts at login (see its Settings); GNOME

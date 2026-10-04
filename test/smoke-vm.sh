@@ -79,8 +79,8 @@ fi
 
 bootc status
 for c in "sbx version" "llmman --version" "herdr --version" "opencode --version" \
-         "codex --version" "claude --version" "openclaw --version" "codexbar --version" \
-         "qemu-img --version"; do
+         "codex --version" "claude --version" "openclaw --version" "goose --version" \
+         "codexbar --version" "qemu-img --version"; do
   as_test "$c"
 done
 
@@ -96,6 +96,7 @@ while read -r bin entry exe; do
 done <<EOF
 chatgpt              chatgpt               lib/chatgpt/ChatGPT
 opencode-desktop     ai.opencode.desktop   lib/opencode-desktop/ai.opencode.desktop
+goose-desktop        Goose                 lib/Goose/Goose
 google-chrome-stable google-chrome         lib/google-chrome/chrome
 codexbar-linux       com.steipete.CodexBar bin/codexbar-linux
 EOF

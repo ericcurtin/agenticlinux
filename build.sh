@@ -225,6 +225,25 @@ find /usr/lib/.build-id -lname '*/opt/OpenCode/*' | while read -r l; do
   ln -sfn "$(readlink "$l" | sed 's|/opt/OpenCode/|/usr/lib/opencode-desktop/|')" "$l"
 done
 
+# Goose: the desktop app's RPM, from the newest release that has this
+# architecture's uploaded. Releases are published before their assets are (the
+# last of 1.51.0's came 18 hours later) and 1.47.0 has no arm64 RPM at all.
+# The file names say arm64 and x86_64, where uname says aarch64. The RPM
+# installs into /usr/lib already, and carries the goose CLI at
+# resources/bin/goose: the same binary, at the same version, as the release's
+# standalone archive, so /usr/bin/goose links to it instead of a second 285 MB
+# copy. goose-desktop is the name llmman looks for.
+goose_url=https://github.com/aaif-goose/goose/releases
+for goose in $(curl "$goose_url.atom" | grep -o 'releases/tag/v[0-9.]*"' | tr -d '"' | sed 's|.*/||'); do
+  goose_rpm=Goose-${goose#v}-1.${ARCH/amd64/x86_64}.rpm
+  command curl -fsIL --retry 5 -o /dev/null "$goose_url/download/$goose/$goose_rpm" && break
+done
+curl -o /tmp/goose.rpm "$goose_url/download/$goose/$goose_rpm"
+dnf -y install /tmp/goose.rpm
+ln -sfn ../lib/Goose/resources/bin/goose /usr/bin/goose
+ln -sfn ../lib/Goose/Goose /usr/bin/goose-desktop
+/usr/bin/goose --version
+
 # CodexBar: a Swift CLI and a Qt tray app over it, from the newest stable
 # release whose Linux archives are all uploaded (that takes minutes after
 # publishing). The CLI finds its resource bundle beside its resolved path,
