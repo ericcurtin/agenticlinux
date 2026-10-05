@@ -145,7 +145,7 @@ on Docker Hub over HTTPS.
 
 ## Updates
 
-The whole OS is one image, rebuilt every Monday and on every push to `main`;
+The whole OS is one image, rebuilt every 4 hours and on every push to `main`;
 the variant's tag (`kde`) is the newest. `/etc` and `/var` (so your home
 directory) carry over between images.
 

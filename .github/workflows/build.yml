@@ -4,7 +4,9 @@ on:
   push:
     branches: [main]
   schedule:
-    - cron: "0 4 * * 1"
+    # Every 4 hours, on main (scheduled workflows only run on the default
+    # branch). GitHub may start a run several minutes late under load.
+    - cron: "0 */4 * * *"
   workflow_dispatch:
 
 env:
