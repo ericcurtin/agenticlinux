@@ -204,10 +204,25 @@ only if a plain reboot stayed on the previous deployment.
 A healthy upgrade is confirmed, a re-staged rejected image is discarded, and a
 later good update still applies.
 
+Other configurations, same images and checks as above:
+
+| Configuration | Cases run | Result |
+|---|---|---|
+| ext4 root | Control, 1a, 2, 3, 4a, 4b, 4c, 4d, and the preflight rejections (1a, 1b, 3, 4c) | Same as XFS; every rollback permanent |
+| Secure Boot | Control, 1a, 2, 3, 4a, 4b, 4c, and a kernel with a bad signature | Same as without it; every rollback permanent |
+
+Secure Boot used edk2 stable202408 built with `SECURE_BOOT_ENABLE` and the Red Hat
+and Microsoft keys enrolled (guest: `SecureBoot=1`, `SetupMode=0`, kernel lockdown
+`integrity`), booting shim, GRUB and the kernel. A tampered kernel that is
+structurally valid passes preflight, but shim refuses it (`bad shim signature`) and
+the armed GRUB fallback rolls back to the previous deployment.
+
 ## Limitations
 
-- GRUB only. Tested on aarch64 and the `base` variant only; x86_64, BIOS, ext4 and
-  Secure Boot are untested.
+- GRUB only. Tested on aarch64 and the `base` variant only; x86_64 and BIOS are
+  untested.
+- Preflight does not verify kernel signatures. Under Secure Boot a kernel that fails
+  verification is caught at its first boot by the GRUB fallback instead.
 - A malformed kernel that passes preflight can hang the firmware, and a kernel that
   hangs without panicking is never caught; both need a hardware watchdog.
 - A passing check proves only what it checks; add checks for your services under
