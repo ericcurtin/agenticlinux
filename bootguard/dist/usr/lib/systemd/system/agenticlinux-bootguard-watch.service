@@ -1,0 +1,12 @@
+[Unit]
+Description=AgenticLinux boot guard: trial boot watchdog
+DefaultDependencies=no
+# Survive systemd isolating emergency.target.
+IgnoreOnIsolate=yes
+Conflicts=shutdown.target
+Before=shutdown.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/agenticlinux-bootguard watch
+KillMode=process

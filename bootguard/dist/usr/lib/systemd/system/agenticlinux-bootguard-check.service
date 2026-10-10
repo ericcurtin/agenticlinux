@@ -1,0 +1,12 @@
+[Unit]
+Description=AgenticLinux boot guard: health checks for a trial boot
+ConditionPathExists=/run/agenticlinux-bootguard/trial
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/agenticlinux-bootguard check
+TimeoutStartSec=900
+
+[Install]
+WantedBy=multi-user.target
