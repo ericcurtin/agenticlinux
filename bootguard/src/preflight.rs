@@ -16,6 +16,12 @@ pub struct Finding {
     pub msg: String,
 }
 
+impl Finding {
+    pub fn tag(&self) -> &'static str {
+        if self.fatal { "FAIL" } else { "note" }
+    }
+}
+
 fn fatal(m: impl Into<String>) -> Finding {
     Finding { fatal: true, msg: m.into() }
 }
@@ -32,6 +38,9 @@ fn u16le(b: &[u8], o: usize) -> Option<u16> {
 fn u32le(b: &[u8], o: usize) -> Option<u32> {
     le(b, o).map(u32::from_le_bytes)
 }
+fn u64le(b: &[u8], o: usize) -> Option<u64> {
+    le(b, o).map(u64::from_le_bytes)
+}
 
 /// Validate a kernel image from its header and total size.
 pub fn check_kernel(head: &[u8], size: u64) -> Result<(), String> {
@@ -40,7 +49,7 @@ pub fn check_kernel(head: &[u8], size: u64) -> Result<(), String> {
         return if bz {
             check_bzimage(head, size)
         } else if head.get(56..60) == Some(b"ARM\x64") {
-            Ok(())
+            check_arm64_image(head, size)
         } else {
             Err("not a recognizable kernel image (bad magic)".into())
         };
@@ -69,6 +78,20 @@ pub fn check_kernel(head: &[u8], size: u64) -> Result<(), String> {
     }
     if bz {
         check_bzimage(head, size)?;
+    }
+    Ok(())
+}
+
+/// Raw arm64 `Image`: a 64-byte header, and `image_size` at offset 16. That is
+/// the effective size including BSS, so it only bounds the file size loosely:
+/// a file under half of it is cut short.
+fn check_arm64_image(head: &[u8], size: u64) -> Result<(), String> {
+    if size < 64 {
+        return Err(format!("truncated arm64 Image: file is {size} bytes"));
+    }
+    let eff = u64le(head, 16).ok_or("truncated arm64 header")?;
+    if size < eff / 2 {
+        return Err(format!("truncated arm64 Image: file is {size} bytes but its image size is {eff}"));
     }
     Ok(())
 }
@@ -102,7 +125,7 @@ pub fn initramfs_payload_offset(f: &File, len: u64) -> Result<(u64, bool), Strin
             o += 1;
         }
         let mut magic = [0u8; 6];
-        if f.read_exact_at(&mut magic, o).is_err() || &magic != b"070701" {
+        if f.read_exact_at(&mut magic, o).is_err() || !matches!(&magic, b"070701" | b"070702") {
             return Ok((o, has_init));
         }
         loop {
@@ -120,12 +143,15 @@ pub fn initramfs_payload_offset(f: &File, len: u64) -> Result<(u64, bool), Strin
             let name = String::from_utf8_lossy(&name[..nsz as usize - 1]).into_owned();
             let a4 = |x: u64| (x + 3) & !3;
             o = a4(a4(o + 110 + nsz) + fsz);
+            if o > len {
+                return Err("early cpio runs past end of file".into());
+            }
             if name == "TRAILER!!!" {
                 break;
             }
             has_init |= is_init(&name);
-            if o >= len {
-                return Err("early cpio runs past end of file".into());
+            if o == len {
+                return Err("early cpio ends without a trailer".into());
             }
         }
     }
@@ -386,6 +412,22 @@ mod tests {
     }
 
     #[test]
+    fn kernel_raw_arm64() {
+        let img = |eff: u64| {
+            let mut h = vec![0u8; 64];
+            h[16..24].copy_from_slice(&eff.to_le_bytes());
+            h[56..60].copy_from_slice(b"ARM\x64");
+            h
+        };
+        assert!(check_kernel(&img(1000), 1000).is_ok());
+        assert!(check_kernel(&img(1000), 500).is_ok(), "BSS makes the file smaller than image_size");
+        assert!(check_kernel(&img(1000), 499).unwrap_err().contains("truncated"));
+        assert!(check_kernel(&img(0), 64).is_ok(), "image_size 0 means unknown");
+        assert!(check_kernel(&img(1 << 25), 64).unwrap_err().contains("truncated"));
+        assert!(check_kernel(&img(0)[..60], 60).unwrap_err().contains("truncated"));
+    }
+
+    #[test]
     fn compression_magic() {
         assert_eq!(detect_compression(&[0x28, 0xB5, 0x2F, 0xFD, 0]).unwrap().0, "zstd");
         assert_eq!(detect_compression(&[0x1f, 0x8b, 8]).unwrap().0, "gzip");
@@ -416,6 +458,28 @@ mod tests {
         assert!(check_initramfs(&b).iter().any(|f| f.fatal && f.msg.contains("no init")));
         std::fs::remove_file(a).ok();
         std::fs::remove_file(b).ok();
+    }
+
+    #[test]
+    fn cpio_crc_magic_and_trailer_bounds() {
+        let data = [b'x'; 1100];
+        let mut crc = cpio(&[("init", &data)]);
+        crc[..6].copy_from_slice(b"070702");
+        let mut big_trailer = cpio(&[("init", &data)]);
+        let t = cpio_entry("init", &data, 5).len();
+        big_trailer[t + 54..t + 62].copy_from_slice(b"00010000");
+        let no_trailer = cpio_entry("init", &data, 5);
+        let (a, b, c) = (tmp("crc", &crc), tmp("bigtrailer", &big_trailer), tmp("notrailer", &no_trailer));
+        assert!(check_initramfs(&a).is_empty());
+        let damaged = |p: &Path, why: &str| {
+            let r = check_initramfs(p);
+            assert!(r.iter().any(|f| f.fatal && f.msg.contains("damaged") && f.msg.contains(why)), "{r:?}");
+        };
+        damaged(&b, "past end");
+        damaged(&c, "without a trailer");
+        for p in [a, b, c] {
+            std::fs::remove_file(p).ok();
+        }
     }
 
     #[test]

@@ -88,11 +88,12 @@ pub fn rollback() -> Result<(), String> {
 /// Is the booted deployment first in the boot order? A non-booted first entry
 /// ("(pending)") boots next; a "(staged)" one is not in the order yet.
 pub fn booted_is_default() -> Result<bool, String> {
-    let out = capture("ostree", &["admin", "status"])?;
-    Ok(parse_booted_is_default(&out))
+    parse_booted_is_default(&capture("ostree", &["admin", "status"])?)
 }
 
-pub fn parse_booted_is_default(out: &str) -> bool {
+/// Errors when no deployment can be read, rather than assuming the booted one
+/// is the default.
+pub fn parse_booted_is_default(out: &str) -> Result<bool, String> {
     for l in out.lines() {
         let t = l.trim_start_matches(' ');
         let booted = t.starts_with("* ");
@@ -102,9 +103,9 @@ pub fn parse_booted_is_default(out: &str) -> bool {
         if !id.contains('.') || l.contains("(staged)") {
             continue;
         }
-        return booted;
+        return Ok(booted);
     }
-    true
+    Err("no deployment found in `ostree admin status`".into())
 }
 
 /// Drop the staged deployment so `ostree-finalize-staged` has nothing to do.
@@ -133,9 +134,13 @@ mod tests {
 
     #[test]
     fn default_order() {
-        assert!(parse_booted_is_default("* default abc.0\n    origin: x\n  default def.0 (rollback)\n"));
-        assert!(!parse_booted_is_default("  default def.0\n    origin: x\n* default abc.1 (rollback)\n"));
-        assert!(!parse_booted_is_default("  default new.0 (pending)\n* default abc.0\n"));
-        assert!(parse_booted_is_default("  default new.0 (staged)\n* default abc.0\n"));
+        let d = parse_booted_is_default;
+        assert_eq!(d("* default abc.0\n    origin: x\n  default def.0 (rollback)\n"), Ok(true));
+        assert_eq!(d("  default def.0\n    origin: x\n* default abc.1 (rollback)\n"), Ok(false));
+        assert_eq!(d("  default new.0 (pending)\n* default abc.0\n"), Ok(false));
+        assert_eq!(d("  default new.0 (staged)\n* default abc.0\n"), Ok(true));
+        assert!(d("").is_err());
+        assert!(d("  default new.0 (staged)\n").is_err());
+        assert!(d("error: something\n").is_err());
     }
 }

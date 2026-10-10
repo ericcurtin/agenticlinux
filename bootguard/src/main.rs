@@ -122,8 +122,7 @@ fn cmd_preflight() -> Res<()> {
         info!("no staged deployment; nothing to check");
         return Ok(());
     };
-    let tag = |f: &preflight::Finding| if f.fatal { "FAIL" } else { "note" };
-    if !check_staged(&staged, &|f| println!("{}: {}", tag(f), f.msg)).is_empty() {
+    if !check_staged(&staged, &|f| println!("{}: {}", f.tag(), f.msg)).is_empty() {
         std::process::exit(1);
     }
     println!("preflight passed for {}", staged.digest);
@@ -143,6 +142,34 @@ fn arm_trial(cfg: &Config, digest: &str) -> Result<(), String> {
     })
 }
 
+/// Preflight and arm the staged deployment. An `Err` means it cannot be
+/// guarded, so the caller must not let it be applied.
+fn arm_staged(cfg: &Config) -> Result<(), String> {
+    let st = bootc::status()?;
+    let Some(staged) = st.staged else { return Ok(()) };
+    if st.booted.is_none() {
+        return Err("cannot determine the booted deployment".into());
+    }
+    if rejected_digests().contains(&staged.digest) {
+        info!("staged image {} was rejected before; discarding it", staged.digest);
+        return bootc::unstage();
+    }
+    if cfg.preflight {
+        let fatals = check_staged(&staged, &|f| info!("preflight {}: {}", f.tag(), f.msg));
+        if !fatals.is_empty() {
+            bootc::unstage()?;
+            reject(&staged.digest, &format!("preflight failed: {}", fatals.join("; ")), false);
+            return Ok(());
+        }
+    }
+    arm_trial(cfg, &staged.digest).map_err(|e| {
+        let _ = clear_trial();
+        format!("could not arm the boot counter for {}: {e}", staged.digest)
+    })?;
+    info!("armed trial for {} with {} boot attempts", staged.digest, cfg.max_attempts);
+    Ok(())
+}
+
 /// Runs at shutdown, before ostree finalizes the staged deployment. Fails
 /// closed: an update that cannot be guarded is not applied.
 fn cmd_arm() -> Res<()> {
@@ -151,32 +178,9 @@ fn cmd_arm() -> Res<()> {
         info!("disabled by configuration");
         return Ok(());
     }
-    let st = bootc::status()?;
-    let Some(staged) = st.staged else { return Ok(()) };
-    if st.booted.is_none() {
-        warn!("cannot determine the booted deployment; not arming");
-        return Ok(());
-    }
-    if rejected_digests().contains(&staged.digest) {
-        info!("staged image {} was rejected before; discarding it", staged.digest);
-        return Ok(bootc::unstage()?);
-    }
-    if cfg.preflight {
-        let tag = |f: &preflight::Finding| if f.fatal { "FAIL" } else { "note" };
-        let fatals = check_staged(&staged, &|f| info!("preflight {}: {}", tag(f), f.msg));
-        if !fatals.is_empty() {
-            bootc::unstage()?;
-            reject(&staged.digest, &format!("preflight failed: {}", fatals.join("; ")), false);
-            return Ok(());
-        }
-    }
-    match arm_trial(&cfg, &staged.digest) {
-        Ok(()) => info!("armed trial for {} with {} boot attempts", staged.digest, cfg.max_attempts),
-        Err(e) => {
-            bootc::unstage()?;
-            let _ = clear_trial();
-            notify(&format!("The update {} was not applied: could not arm the boot counter: {e}", staged.digest));
-        }
+    if let Err(e) = arm_staged(&cfg) {
+        bootc::unstage()?;
+        notify(&format!("The update was not applied: {e}"));
     }
     Ok(())
 }
@@ -271,17 +275,20 @@ fn cmd_assess() -> Res<()> {
 
 // ---- health checks -------------------------------------------------------
 
-/// Executable scripts in `sub` under /usr/lib and /etc; /etc overrides by name.
-fn collect_scripts(sub: &str) -> Vec<PathBuf> {
+/// Scripts in `sub` under `bases`; a later base overrides by name, even with a
+/// file that is not executable, which masks the earlier one. Only executables run.
+fn scripts_in(bases: &[&Path], sub: &str) -> Vec<PathBuf> {
     let mut m = std::collections::BTreeMap::new();
-    for base in ["/usr/lib/agenticlinux-bootguard", "/etc/agenticlinux-bootguard"] {
-        for e in std::fs::read_dir(Path::new(base).join(sub)).into_iter().flatten().flatten() {
-            if sys::is_executable(&e.path()) {
-                m.insert(e.file_name(), e.path());
-            }
+    for base in bases {
+        for e in std::fs::read_dir(base.join(sub)).into_iter().flatten().flatten() {
+            m.insert(e.file_name(), e.path());
         }
     }
-    m.into_values().collect()
+    m.into_values().filter(|p| sys::is_executable(p)).collect()
+}
+
+fn collect_scripts(sub: &str) -> Vec<PathBuf> {
+    scripts_in(&[Path::new("/usr/lib/agenticlinux-bootguard"), Path::new("/etc/agenticlinux-bootguard")], sub)
 }
 
 fn run_script(p: &Path, timeout: Duration) -> Result<(), String> {
@@ -439,5 +446,32 @@ fn main() {
     if let Err(e) = r {
         eprintln!("agenticlinux-bootguard: {cmd}: error: {e}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn script(dir: &Path, name: &str, mode: u32) {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(dir.join(name), "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(dir.join(name), std::fs::Permissions::from_mode(mode)).unwrap();
+    }
+
+    #[test]
+    fn later_base_overrides_by_name_and_can_mask() {
+        let root = std::env::temp_dir().join(format!("bg-scripts-{}", std::process::id()));
+        let (vendor, admin) = (root.join("usr"), root.join("etc"));
+        script(&vendor.join("c"), "10-a", 0o755);
+        script(&vendor.join("c"), "20-b", 0o755);
+        script(&vendor.join("c"), "30-c", 0o755);
+        script(&admin.join("c"), "20-b", 0o644);
+        script(&admin.join("c"), "40-d", 0o755);
+        script(&admin.join("c"), "50-e", 0o644);
+        let got: Vec<_> = scripts_in(&[&vendor, &admin], "c").iter().map(|p| p.file_name().unwrap().to_owned()).collect();
+        assert_eq!(got, ["10-a", "30-c", "40-d"]);
+        std::fs::remove_dir_all(root).ok();
     }
 }

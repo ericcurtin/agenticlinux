@@ -81,7 +81,7 @@ One binary, `/usr/bin/agenticlinux-bootguard`, four units:
 
 `arm` refuses a staged image if any of these fail:
 
-- **Kernel**: valid PE, EFI zboot or bzImage structure, not truncated.
+- **Kernel**: valid PE, EFI zboot, bzImage or arm64 `Image` structure, not truncated.
 - **Initramfs**: known compression after any early microcode archive, and the
   matching integrity test (`zstd`, `gzip`, `xz`, `lz4`, `bzip2`; skipped with a
   note if not installed). A plain cpio needs an `init`.
@@ -105,13 +105,15 @@ digest is tried normally.
 4. `green.d/*` run on success, `red.d/*` on failure.
 
 Scripts live in `/usr/lib/agenticlinux-bootguard/` and `/etc/agenticlinux-bootguard/`
-(`/etc` overrides by filename), must be executable, and are killed with their
+(`/etc` overrides by filename; a non-executable override masks the vendor script),
+must be executable, and are killed with their
 process group after `CHECK_TIMEOUT`, so a hanging check is a failed check.
 
 ### Fail-closed behaviour
 
 - A trial whose counter is missing or unreadable is treated as used up.
-- If the boot counter cannot be written and checkpointed, the update is not applied.
+- If the boot counter cannot be written and checkpointed, or `bootc status` fails
+  or shows no booted deployment, the update is not applied.
 - If a passing trial cannot be cleared in `grubenv` (after retries), it is not
   confirmed, so the watchdog keeps running.
 - The watchdog stops only on confirmation and escalates `reboot`, `--force`,
