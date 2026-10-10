@@ -9,10 +9,49 @@ reach userspace (bad kernel or initramfs, kernel panic, root cannot be mounted)
 and failures after it (failed or hung health checks, hung boot, emergency mode).
 
 It replaces [greenboot](https://github.com/fedora-iot/greenboot-rs); do not
-install both. On Fedora 44 (greenboot 0.16.4, XFS root) greenboot recovered none
-of these: its rollback trigger never runs (the unit lacks `Conflicts=final.target`),
-GRUB reads a stale `grubenv` on XFS, and its counter is only created after a
-health check has already failed in userspace.
+install both. See [Compared with greenboot](#compared-with-greenboot).
+
+## Compared with greenboot
+
+Same qemu setup and failing images for both tools (Fedora 44, greenboot 0.16.4,
+bootc 1.16.13, XFS root, GRUB). "Worked around" means greenboot with its rollback
+trigger fixed (`Conflicts=final.target`) and an XFS freeze after each `grubenv`
+edit; on ext4 only the first is needed.
+
+| # | Failure | greenboot as shipped | greenboot, worked around | bootguard |
+|---|---|---|---|---|
+| 1a | Garbage kernel | Stuck at the GRUB menu | Rolled back | Rejected before reboot, or rolled back |
+| 1b | Truncated kernel | Not run | Firmware hangs | **Rejected before reboot** |
+| 2 | Kernel panic | Not run | **Hangs forever** | Rolled back |
+| 3 | Initramfs cannot mount root | Not run | **Stuck in the emergency shell** | Rolled back |
+| 4a | Health check fails | **Reboot loop, never rolls back** (32 boots in 7 min) | Rolled back | Rolled back |
+| 4b | Hang before health checks | Not run | **Hangs forever** | Rolled back |
+| 4c | Emergency mode (bad fstab) | Not run | **Stuck** (root is locked) | Rolled back |
+| 4d | Health check hangs | Not run | **Stays on the bad image** | Rolled back |
+
+"Not run" rows were not tried against stock greenboot. Its rollback trigger never
+runs there, so even 4a, the case it is designed for, fails.
+
+Why greenboot misses these:
+
+- **Its rollback trigger never runs.** The unit has no `Conflicts=final.target`, so
+  `fallback=1` and the next-deployment id are never written. GRUB has nothing to
+  fall back to. On ext4, after three failed checks greenboot stops with "no
+  next-deployment-id set" and stays on the bad image.
+- **GRUB reads a stale `grubenv` on XFS.** It cannot replay the journal, so counter
+  decrements were lost (stuck at 2 for 40 boots).
+- **Its counter starts only after a health check fails in userspace.** A boot that
+  never reaches userspace is never counted. Adding `panic=5`, `rd.emergency=reboot`
+  or a systemd job timeout to greenboot only turned hangs into endless reboot
+  loops (27, 18+ and repeating boots, none rolled back).
+- **No timeouts and no pre-reboot validation.** A hanging check blocks forever, and
+  a bad image is only discovered by booting it.
+
+What bootguard does about each: it arms the counter before the first boot and lets
+GRUB count every attempt (2, 3, 4b, 4c); preflights the staged image (1a, 1b, 2, 3,
+4c); runs a watchdog and per-check timeouts (4b, 4c, 4d); writes `grubenv` in place
+and checkpoints `/boot` (XFS); and remembers rejected digests so an update timer
+does not re-apply them.
 
 ## How it works
 
