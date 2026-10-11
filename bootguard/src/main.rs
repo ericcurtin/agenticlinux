@@ -276,19 +276,34 @@ fn cmd_assess() -> Res<()> {
 // ---- health checks -------------------------------------------------------
 
 /// Scripts in `sub` under `bases`; a later base overrides by name, even with a
-/// file that is not executable, which masks the earlier one. Only executables run.
-fn scripts_in(bases: &[&Path], sub: &str) -> Vec<PathBuf> {
+/// file that is not executable, which masks the earlier one. Only executables
+/// run. A missing directory is empty; any other read error is returned.
+fn scripts_in(bases: &[&Path], sub: &str) -> Result<Vec<PathBuf>, String> {
     let mut m = std::collections::BTreeMap::new();
-    for base in bases {
-        for e in std::fs::read_dir(base.join(sub)).into_iter().flatten().flatten() {
+    for dir in bases.iter().map(|b| b.join(sub)) {
+        let rd = match std::fs::read_dir(&dir) {
+            Ok(rd) => rd,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(format!("cannot read {}: {e}", dir.display())),
+        };
+        for e in rd {
+            let e = e.map_err(|e| format!("cannot read {}: {e}", dir.display()))?;
             m.insert(e.file_name(), e.path());
         }
     }
-    m.into_values().filter(|p| sys::is_executable(p)).collect()
+    Ok(m.into_values().filter(|p| sys::is_executable(p)).collect())
 }
 
-fn collect_scripts(sub: &str) -> Vec<PathBuf> {
+fn collect_scripts(sub: &str) -> Result<Vec<PathBuf>, String> {
     scripts_in(&[Path::new("/usr/lib/agenticlinux-bootguard"), Path::new("/etc/agenticlinux-bootguard")], sub)
+}
+
+/// Like `collect_scripts`, for scripts that are not required: log and skip.
+fn optional_scripts(sub: &str) -> Vec<PathBuf> {
+    collect_scripts(sub).unwrap_or_else(|e| {
+        warn!("{e}");
+        vec![]
+    })
 }
 
 fn run_script(p: &Path, timeout: Duration) -> Result<(), String> {
@@ -304,7 +319,7 @@ fn run_script(p: &Path, timeout: Duration) -> Result<(), String> {
 }
 
 fn run_hooks(sub: &str, cfg: &Config) {
-    for s in collect_scripts(sub) {
+    for s in optional_scripts(sub) {
         let _ = run_script(&s, cfg.check_timeout);
     }
 }
@@ -319,10 +334,10 @@ fn run_checks(cfg: &Config) -> Result<(), String> {
             return Err(format!("failed units: {l}"));
         }
     }
-    for s in collect_scripts("check/required.d") {
+    for s in collect_scripts("check/required.d")? {
         run_script(&s, cfg.check_timeout)?;
     }
-    for s in collect_scripts("check/wanted.d") {
+    for s in optional_scripts("check/wanted.d") {
         if let Err(e) = run_script(&s, cfg.check_timeout) {
             warn!("wanted check: {e}");
         }
@@ -470,8 +485,11 @@ mod tests {
         script(&admin.join("c"), "20-b", 0o644);
         script(&admin.join("c"), "40-d", 0o755);
         script(&admin.join("c"), "50-e", 0o644);
-        let got: Vec<_> = scripts_in(&[&vendor, &admin], "c").iter().map(|p| p.file_name().unwrap().to_owned()).collect();
+        let got: Vec<_> = scripts_in(&[&vendor, &admin], "c").unwrap().iter().map(|p| p.file_name().unwrap().to_owned()).collect();
         assert_eq!(got, ["10-a", "30-c", "40-d"]);
+        assert!(scripts_in(&[&vendor], "missing").unwrap().is_empty());
+        std::fs::write(vendor.join("file"), "").unwrap();
+        assert!(scripts_in(&[&vendor], "file").is_err(), "not a directory is an error");
         std::fs::remove_dir_all(root).ok();
     }
 }

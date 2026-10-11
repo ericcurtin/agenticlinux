@@ -38,9 +38,6 @@ fn u16le(b: &[u8], o: usize) -> Option<u16> {
 fn u32le(b: &[u8], o: usize) -> Option<u32> {
     le(b, o).map(u32::from_le_bytes)
 }
-fn u64le(b: &[u8], o: usize) -> Option<u64> {
-    le(b, o).map(u64::from_le_bytes)
-}
 
 /// Validate a kernel image from its header and total size.
 pub fn check_kernel(head: &[u8], size: u64) -> Result<(), String> {
@@ -49,7 +46,7 @@ pub fn check_kernel(head: &[u8], size: u64) -> Result<(), String> {
         return if bz {
             check_bzimage(head, size)
         } else if head.get(56..60) == Some(b"ARM\x64") {
-            check_arm64_image(head, size)
+            check_arm64_image(size)
         } else {
             Err("not a recognizable kernel image (bad magic)".into())
         };
@@ -82,16 +79,12 @@ pub fn check_kernel(head: &[u8], size: u64) -> Result<(), String> {
     Ok(())
 }
 
-/// Raw arm64 `Image`: a 64-byte header, and `image_size` at offset 16. That is
-/// the effective size including BSS, so it only bounds the file size loosely:
-/// a file under half of it is cut short.
-fn check_arm64_image(head: &[u8], size: u64) -> Result<(), String> {
+/// Raw arm64 `Image`: only the 64-byte header is checked. `image_size` is the
+/// effective memory size (including BSS), not the file length, so it is no
+/// basis for a truncation check.
+fn check_arm64_image(size: u64) -> Result<(), String> {
     if size < 64 {
         return Err(format!("truncated arm64 Image: file is {size} bytes"));
-    }
-    let eff = u64le(head, 16).ok_or("truncated arm64 header")?;
-    if size < eff / 2 {
-        return Err(format!("truncated arm64 Image: file is {size} bytes but its image size is {eff}"));
     }
     Ok(())
 }
@@ -114,6 +107,29 @@ fn is_init(name: &str) -> bool {
     ["init", "sbin/init", "usr/sbin/init", "usr/lib/systemd/systemd", "lib/systemd/systemd"].contains(&n)
 }
 
+/// Does this start a cpio entry? `Some(true)` for the CRC format (070702),
+/// whose header carries a checksum of the file data.
+fn cpio_has_checksum(magic: &[u8]) -> Option<bool> {
+    match magic {
+        b"070701" => Some(false),
+        b"070702" => Some(true),
+        _ => None,
+    }
+}
+
+/// Sum of `n` bytes at `off`, modulo 2^32 (the cpio CRC format's checksum).
+fn byte_sum(f: &File, mut off: u64, mut n: u64) -> std::io::Result<u32> {
+    let mut buf = [0u8; 1 << 16];
+    let mut sum = 0u32;
+    while n > 0 {
+        let k = n.min(buf.len() as u64) as usize;
+        f.read_exact_at(&mut buf[..k], off)?;
+        sum = buf[..k].iter().fold(sum, |s, &b| s.wrapping_add(b as u32));
+        (off, n) = (off + k as u64, n - k as u64);
+    }
+    Ok(sum)
+}
+
 /// Skip uncompressed "early" cpio archives (CPU microcode) at the start of an
 /// initramfs. Returns the offset after them, and whether they held an init.
 pub fn initramfs_payload_offset(f: &File, len: u64) -> Result<(u64, bool), String> {
@@ -125,7 +141,7 @@ pub fn initramfs_payload_offset(f: &File, len: u64) -> Result<(u64, bool), Strin
             o += 1;
         }
         let mut magic = [0u8; 6];
-        if f.read_exact_at(&mut magic, o).is_err() || !matches!(&magic, b"070701" | b"070702") {
+        if f.read_exact_at(&mut magic, o).is_err() || cpio_has_checksum(&magic).is_none() {
             return Ok((o, has_init));
         }
         loop {
@@ -134,7 +150,10 @@ pub fn initramfs_payload_offset(f: &File, len: u64) -> Result<(u64, bool), Strin
             let hex = |a: usize| {
                 std::str::from_utf8(&h[a..a + 8]).ok().and_then(|s| u64::from_str_radix(s, 16).ok())
             };
-            let (fsz, nsz) = hex(54).zip(hex(94)).ok_or("bad cpio header")?;
+            let crc = cpio_has_checksum(&h[..6]).ok_or("bad cpio magic")?;
+            let (Some(fsz), Some(nsz), Some(sum)) = (hex(54), hex(94), hex(102)) else {
+                return Err("bad cpio header".into());
+            };
             if nsz == 0 || nsz > 4096 || o + 110 + nsz > len {
                 return Err(format!("implausible cpio name size {nsz}"));
             }
@@ -142,9 +161,13 @@ pub fn initramfs_payload_offset(f: &File, len: u64) -> Result<(u64, bool), Strin
             f.read_exact_at(&mut name, o + 110).map_err(|e| format!("early cpio name: {e}"))?;
             let name = String::from_utf8_lossy(&name[..nsz as usize - 1]).into_owned();
             let a4 = |x: u64| (x + 3) & !3;
-            o = a4(a4(o + 110 + nsz) + fsz);
+            let data = a4(o + 110 + nsz);
+            o = a4(data + fsz);
             if o > len {
                 return Err("early cpio runs past end of file".into());
+            }
+            if crc && byte_sum(f, data, fsz).map_err(|e| format!("early cpio data: {e}"))? as u64 != sum {
+                return Err(format!("checksum mismatch in cpio entry {name}"));
             }
             if name == "TRAILER!!!" {
                 break;
@@ -413,18 +436,11 @@ mod tests {
 
     #[test]
     fn kernel_raw_arm64() {
-        let img = |eff: u64| {
-            let mut h = vec![0u8; 64];
-            h[16..24].copy_from_slice(&eff.to_le_bytes());
-            h[56..60].copy_from_slice(b"ARM\x64");
-            h
-        };
-        assert!(check_kernel(&img(1000), 1000).is_ok());
-        assert!(check_kernel(&img(1000), 500).is_ok(), "BSS makes the file smaller than image_size");
-        assert!(check_kernel(&img(1000), 499).unwrap_err().contains("truncated"));
-        assert!(check_kernel(&img(0), 64).is_ok(), "image_size 0 means unknown");
-        assert!(check_kernel(&img(1 << 25), 64).unwrap_err().contains("truncated"));
-        assert!(check_kernel(&img(0)[..60], 60).unwrap_err().contains("truncated"));
+        let mut h = vec![0u8; 64];
+        h[16..24].copy_from_slice(&(1u64 << 25).to_le_bytes());
+        h[56..60].copy_from_slice(b"ARM\x64");
+        assert!(check_kernel(&h, 64).is_ok(), "image_size is not a file length");
+        assert!(check_kernel(&h[..60], 60).unwrap_err().contains("truncated"));
     }
 
     #[test]
@@ -461,25 +477,32 @@ mod tests {
     }
 
     #[test]
-    fn cpio_crc_magic_and_trailer_bounds() {
+    fn cpio_crc_checksum_and_trailer_bounds() {
         let data = [b'x'; 1100];
-        let mut crc = cpio(&[("init", &data)]);
-        crc[..6].copy_from_slice(b"070702");
+        let crc = |chk: u32| {
+            let mut e = cpio_entry("init", &data, 5);
+            e[..6].copy_from_slice(b"070702");
+            e[102..110].copy_from_slice(format!("{chk:08x}").as_bytes());
+            e.extend(cpio_entry("TRAILER!!!", b"", 11));
+            e
+        };
+        let sum = 1100 * u32::from(b'x');
         let mut big_trailer = cpio(&[("init", &data)]);
         let t = cpio_entry("init", &data, 5).len();
         big_trailer[t + 54..t + 62].copy_from_slice(b"00010000");
         let no_trailer = cpio_entry("init", &data, 5);
-        let (a, b, c) = (tmp("crc", &crc), tmp("bigtrailer", &big_trailer), tmp("notrailer", &no_trailer));
-        assert!(check_initramfs(&a).is_empty());
-        let damaged = |p: &Path, why: &str| {
+        let files = [
+            tmp("crc-ok", &crc(sum)),
+            tmp("crc-bad", &crc(sum + 1)),
+            tmp("bigtrailer", &big_trailer),
+            tmp("notrailer", &no_trailer),
+        ];
+        assert!(check_initramfs(&files[0]).is_empty());
+        for (p, why) in files[1..].iter().zip(["checksum mismatch", "past end", "without a trailer"]) {
             let r = check_initramfs(p);
-            assert!(r.iter().any(|f| f.fatal && f.msg.contains("damaged") && f.msg.contains(why)), "{r:?}");
-        };
-        damaged(&b, "past end");
-        damaged(&c, "without a trailer");
-        for p in [a, b, c] {
-            std::fs::remove_file(p).ok();
+            assert!(r.iter().any(|f| f.fatal && f.msg.contains("damaged") && f.msg.contains(why)), "{why}: {r:?}");
         }
+        files.iter().for_each(|p| std::fs::remove_file(p).unwrap_or(()));
     }
 
     #[test]

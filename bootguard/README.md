@@ -81,10 +81,12 @@ One binary, `/usr/bin/agenticlinux-bootguard`, four units:
 
 `arm` refuses a staged image if any of these fail:
 
-- **Kernel**: valid PE, EFI zboot, bzImage or arm64 `Image` structure, not truncated.
+- **Kernel**: valid PE, EFI zboot or bzImage structure, not truncated (a raw
+  arm64 `Image` only needs its header).
 - **Initramfs**: known compression after any early microcode archive, and the
   matching integrity test (`zstd`, `gzip`, `xz`, `lz4`, `bzip2`; skipped with a
-  note if not installed). A plain cpio needs an `init`.
+  note if not installed). A plain cpio needs an `init`, and its `070702` checksums
+  must match.
 - **`root=`** in `usr/lib/bootc/kargs.d/*.toml` (parsed as TOML, honouring
   `match-architectures`) must name an existing device.
 - **fstab** (staged, booted and image copies): local-device entries must exist
@@ -114,6 +116,7 @@ process group after `CHECK_TIMEOUT`, so a hanging check is a failed check.
 - A trial whose counter is missing or unreadable is treated as used up.
 - If the boot counter cannot be written and checkpointed, or `bootc status` fails
   or shows no booted deployment, the update is not applied.
+- A required check directory that cannot be read fails the boot.
 - If a passing trial cannot be cleared in `grubenv` (after retries), it is not
   confirmed, so the watchdog keeps running.
 - The watchdog stops only on confirmation and escalates `reboot`, `--force`,
