@@ -1,0 +1,17 @@
+[Unit]
+Description=AgenticLinux boot guard: assess trial boot
+DefaultDependencies=no
+ConditionPathExists=/run/ostree-booted
+# Not after local-fs.target: the watchdog must be armed before a failed mount
+# can drop systemd into emergency mode.
+RequiresMountsFor=/boot
+After=ostree-remount.service
+Before=sysinit.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/agenticlinux-bootguard boot
+TimeoutStartSec=120
+
+[Install]
+WantedBy=sysinit.target

@@ -1,0 +1,12 @@
+[Unit]
+Description=AgenticLinux boot guard: trial boot watchdog
+DefaultDependencies=no
+# Survive systemd isolating emergency.target.
+IgnoreOnIsolate=yes
+# No Conflicts=shutdown.target: the first reboot request would stop this unit
+# and the forced reboots below would never run if shutdown hangs.
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/agenticlinux-bootguard watch
+KillMode=process

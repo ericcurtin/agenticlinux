@@ -1,0 +1,4 @@
+# Reboot instead of hanging on early failures, so the GRUB boot counter counts
+# the attempt: panic after 5s; no initramfs shell, reboot on failure; give up
+# waiting for the root device after 30s. Delete this file to opt out.
+kargs = ["panic=5", "rd.shell=0", "rd.emergency=reboot", "rd.retry=30"]
