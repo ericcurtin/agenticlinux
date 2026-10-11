@@ -1,0 +1,21 @@
+[Unit]
+Description=AgenticLinux boot guard: preflight and arm a trial before an update is applied
+DefaultDependencies=no
+ConditionPathExists=|/run/ostree-booted
+ConditionKernelCommandLine=|composefs
+RequiresMountsFor=/boot
+# Pulled in whenever an update is staged. Starting after the finalizer means
+# ExecStop runs before it. Without Conflicts= systemd never stops this unit.
+After=ostree-finalize-staged.service rpm-ostreed.service bootc-finalize-staged.service
+Conflicts=final.target
+Before=final.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/true
+ExecStop=/usr/bin/agenticlinux-bootguard arm
+TimeoutStopSec=300
+
+[Install]
+RequiredBy=ostree-finalize-staged.service bootc-finalize-staged.service

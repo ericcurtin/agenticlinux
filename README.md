@@ -159,6 +159,10 @@ sudo bootc rollback         # boot the previous image next time; again to undo
 `/var` is shared by both images, so a rollback does not undo changes to your
 data.
 
+A failed update rolls back by itself. The new image gets three boot attempts,
+and if it does not come up healthy the machine returns to the previous image and
+does not retry the bad one; see [bootguard](bootguard/README.md).
+
 Every build is also tagged `<variant>-<version>`, the name of a
 [release](https://github.com/ericcurtin/agenticlinux/releases). Switch to one
 to pin it, and back to the variant's tag to follow the newest:
