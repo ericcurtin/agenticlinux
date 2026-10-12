@@ -5,10 +5,11 @@
 # architectures and skips what would need nested containers (docker, podman,
 # llmman's container runtime); the VM mode only runs where hardware
 # virtualization exists and covers everything.
+llmman_data=/home/test/.local/share/llmman
 finish() {
   [ "$1" -eq 0 ] && return
   # Which runtime the daemon picked and why a load failed
-  tail -n 40 /home/test/.local/share/llmman/serve.log 2>/dev/null || true
+  tail -n 40 "$llmman_data/serve.log" 2>/dev/null || true
   echo SMOKE FAIL
 }
 trap 'finish $?' EXIT
@@ -45,8 +46,9 @@ as_test() { runuser -l test -c "$client_env $*"; }
 if systemd-detect-virt -cq; then
   # llama-server inherits the daemon's environment here (in the VM llmman runs
   # it in a container and forwards only a fixed list of variables), so codex
-  # can be bounded too
-  client_env="LLMMAN_RUNTIME=bin LLAMA_ARG_N_PREDICT=4096 $client_env"
+  # can be bounded too. LLMMAN_LLM_LIBRARY=cpu is what a GPU-less container
+  # gets anyway; it fixes the backend that seed_llama_cpp has to fill.
+  client_env="LLMMAN_RUNTIME=bin LLMMAN_LLM_LIBRARY=cpu LLAMA_ARG_N_PREDICT=4096 $client_env"
   inference=1
 else
   client_env="LLMMAN_RUNTIME=docker $client_env"
@@ -115,25 +117,41 @@ as_test "QT_QPA_PLATFORM=offscreen timeout 120 /usr/libexec/codexbar-autostart &
 # the arm64 runners, nearly all of it prompt processing of its 20k-token
 # system prompt.
 if [ "$inference" != 0 ]; then
-  # In a container llmman downloads llama.cpp itself (LLMMAN_RUNTIME=bin
-  # above) and looks the release up through GitHub's REST API with no token:
-  # 60 requests an hour per IP address, shared by every job behind the
-  # runner's address. That has answered 403 Forbidden to all three tries of
-  # the first agent turn within three minutes (sway, arm64), and a daemon
-  # whose fetch failed repeats it on every load. Fetch it once here, before
-  # the daemon starts, and when the limit is spent wait for the reset GitHub
-  # reports (asking /rate_limit does not count against it) instead of
-  # retrying into the same hour. Once the pinned release is cached llmman
-  # does not ask again.
+  # In a container llmman downloads llama.cpp itself (LLMMAN_RUNTIME=bin) and
+  # looks the release up through GitHub's REST API with no token: 60 requests
+  # an hour per IP address, shared by every job behind the runner's address.
+  # That has answered 403 to every try, and a daemon whose fetch failed
+  # repeats it on every load, so fetch it once here, before the daemon starts.
+  # Waiting out the limit does not help (centos-kde: 403 again after 882 s,
+  # and again after 114 s more). Only the lookup is limited; the release's
+  # files are plain github.com downloads. So when llmman fails, unpack the
+  # release it asked for into its cache and run it again.
   if systemd-detect-virt -cq; then
+    # The cache is <tag>/<backend>, complete once the sentinel exists
+    seed_llama_cpp() {
+      local tag=$1 arch tgz ok=0
+      local dest=$llmman_data/llama.cpp/$tag/cpu
+      case $(uname -m) in x86_64) arch=x64 ;; aarch64) arch=arm64 ;; *) return 1 ;; esac
+      [ ! -e "$dest/.llmman-complete" ] || return 1 # seeded already: not the API
+      tgz=$(mktemp)
+      curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 -o "$tgz" \
+        "https://github.com/ggml-org/llama.cpp/releases/download/$tag/llama-$tag-bin-ubuntu-$arch.tar.gz" &&
+        runuser -l test -c "rm -rf '$dest' && mkdir -p '$dest' && tar -xzf - -C '$dest' &&
+          touch '$dest/.llmman-complete'" <"$tgz" || ok=1
+      rm -f "$tgz"
+      return "$ok"
+    }
+    pull_log=$(mktemp)
     for i in 1 2 3; do
-      as_test "llmman serve --pull-only" && break
+      status=0
+      as_test "llmman serve --pull-only" >"$pull_log" 2>&1 || status=$?
+      cat "$pull_log"
+      [ "$status" -ne 0 ] || break
       [ "$i" -lt 3 ] || exit 1
-      delay=$(curl -fsS --retry 3 https://api.github.com/rate_limit | jq '.resources.core |
-        if .remaining > 0 then 30 else [[.reset - now + 10, 10] | max, 3700] | min | floor end') ||
-        delay=60
-      echo "fetching llama.cpp again in $delay s"
-      sleep "$delay"
+      # "... api.github.com/repos/ggml-org/llama.cpp/releases/tags/b11429 returned 403"
+      tag=
+      [[ $(<"$pull_log") =~ releases/tags/(b[0-9]+) ]] && tag=${BASH_REMATCH[1]}
+      [ -n "$tag" ] && seed_llama_cpp "$tag" || sleep 30
     done
   fi
   # Three tries, as for the agents' turns below: the pull is a chain of

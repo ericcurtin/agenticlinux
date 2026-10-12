@@ -19,10 +19,23 @@ command -v sha256sum >/dev/null || sum="shasum -a 256" # macOS
 
 verify() { (cd "$name" 2>/dev/null && $sum -c ./*.sha256); }
 
+# The artifact's id. api.github.com has been unreachable from a runner for
+# over a minute, longer than all three attempts below, so retry the lookup
+# for about 5 minutes.
+artifact_id() {
+  local n id tries=5
+  for ((n = 1; n <= tries; n++)); do
+    id=$(gh api "$api/runs/$GITHUB_RUN_ID/artifacts?name=$name" --jq '.artifacts[0].id') &&
+      [[ $id =~ ^[0-9]+$ ]] && echo "$id" && return 0
+    echo "$name: looking up the artifact failed (try $n of $tries)" >&2
+    [ "$n" -eq "$tries" ] || sleep $((n * 15))
+  done
+  return 1
+}
+
 download() {
   local id url have=0 last stuck=0
-  id=$(gh api "$api/runs/$GITHUB_RUN_ID/artifacts?name=$name" --jq '.artifacts[0].id') &&
-    [[ $id =~ ^[0-9]+$ ]] || return 1
+  id=$(artifact_id) || return 1
   # Gives up after 10 drops in a row that made no progress
   while [ "$stuck" -lt 10 ]; do
     # The API redirects to a URL signed for 10 minutes, so get a fresh one
