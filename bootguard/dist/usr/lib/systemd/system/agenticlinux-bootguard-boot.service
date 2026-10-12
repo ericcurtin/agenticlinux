@@ -7,6 +7,9 @@ ConditionKernelCommandLine=|composefs
 # Not after local-fs.target: the watchdog must be armed before a failed mount
 # can drop systemd into emergency mode.
 RequiresMountsFor=/boot
+# bootc status writes a temporary file in /tmp. Without this the unit can run
+# before tmp.mount, when /tmp is still on the read-only root, and fail.
+RequiresMountsFor=/tmp
 After=ostree-remount.service
 Before=sysinit.target
 
