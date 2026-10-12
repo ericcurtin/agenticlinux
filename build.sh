@@ -27,6 +27,17 @@ case "$VARIANT" in centos-*) want=centos ;; *) want=fedora ;; esac
 # /root is a dangling symlink to /var/roothome during the build
 export HOME=/tmp
 
+# Run a command up to 12 times, 20 s apart
+retry() {
+  local i
+  for i in $(seq 12); do
+    "$@" && return
+    echo "${*:1:2} failed ($i/12)" >&2
+    [ "$i" -lt 12 ] && sleep 20
+  done
+  return 1
+}
+
 # Patient retries: GitHub Releases has had multi-minute outages mid-build
 curl() { command curl -fsSL --retry 12 --retry-delay 20 --retry-all-errors "$@"; }
 # And dnf the same. Its own retries are immediate and per mirror, so a stall
@@ -41,14 +52,17 @@ curl() { command curl -fsSL --retry 12 --retry-delay 20 --retry-all-errors "$@";
 # however often it is retried. It also supplements vlc-plugins-base, so once
 # EPEL catches up any transaction would pull it in: it is excluded from all of
 # them, and the image is the same whichever repository is ahead.
-dnf() {
-  local i
-  for i in $(seq 12); do
-    command dnf --exclude=vlc-plugins-freeworld "$@" && return
-    [ "$i" -lt 12 ] || return 1
-    echo "dnf failed, retrying in 20 s ($i/12)" >&2
-    sleep 20
-  done
+dnf() { retry command dnf --exclude=vlc-plugins-freeworld "$@"; }
+
+# A repository's version tags (v1.2.3, no prereleases), newest first, from its
+# releases URL. Not from releases.atom: that feed answered 502/504 for minutes
+# and failed six builds, where git ls-remote has not failed. A tag precedes its
+# files, so callers check those. Use as var=$(retry release_tags URL): in a for
+# list a failed $(...) is ignored, and the build died on "unbound variable".
+release_tags() {
+  local tags
+  tags=$(git ls-remote --tags --refs --sort=-v:refname "${1%/releases}.git" |
+    sed -n 's|.*refs/tags/\(v[0-9.]*\)$|\1|p') && [ -n "$tags" ] && echo "$tags"
 }
 
 KVER=$(rpm -q kernel --qf '%{VERSION}-%{RELEASE}.%{ARCH}')
@@ -242,7 +256,8 @@ done
 # standalone archive, so /usr/bin/goose links to it instead of a second 285 MB
 # copy. goose-desktop is the name llmman looks for.
 goose_url=https://github.com/aaif-goose/goose/releases
-for goose in $(curl "$goose_url.atom" | grep -o 'releases/tag/v[0-9.]*"' | tr -d '"' | sed 's|.*/||'); do
+goose_tags=$(retry release_tags "$goose_url")
+for goose in $goose_tags; do
   goose_rpm=Goose-${goose#v}-1.${ARCH/amd64/x86_64}.rpm
   command curl -fsIL --retry 5 -o /dev/null "$goose_url/download/$goose/$goose_rpm" && break
 done
@@ -257,7 +272,8 @@ ln -sfn ../lib/Goose/Goose /usr/bin/goose-desktop
 # publishing). The CLI finds its resource bundle beside its resolved path,
 # so its archive stays whole.
 cb_url=https://github.com/steipete/CodexBar/releases
-for cb in $(curl "$cb_url.atom" | grep -o 'releases/tag/v[0-9.]*"' | tr -d '"' | sed 's|.*/||'); do
+cb_tags=$(retry release_tags "$cb_url")
+for cb in $cb_tags; do
   files=$(echo CodexBar{CLI,Desktop}-"$cb-linux-$(uname -m)".tar.gz{,.sha256})
   for f in $files; do
     command curl -fsIL --retry 5 -o /dev/null "$cb_url/download/$cb/$f" || continue 2
