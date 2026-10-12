@@ -39,6 +39,20 @@ set -eux
 client_env="LLMMAN_CONTEXT_LENGTH=65536 CLAUDE_CODE_MAX_OUTPUT_TOKENS=4096 OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX=4096"
 as_test() { runuser -l test -c "$client_env $*"; }
 
+# Run a command up to three times. Clients crash now and then in the macOS
+# runners' guests (CodexBar segfaulted, goose aborted after its version); each
+# failed try is logged with the kernel's crash lines, so a retry stays visible.
+retry() {
+  local i status=0
+  for i in 1 2 3; do
+    "$@" && return 0
+    status=$?
+    echo "attempt $i of 3 failed with status $status: $*"
+    dmesg 2>/dev/null | grep -E 'segfault|general protection|traps:' | tail -n 3 || true
+  done
+  return "$status"
+}
+
 # llmman's --runtime auto falls through docker -> podman -> bin on any failure
 # (a slow docker info, a failed image pull) and keeps that choice; under
 # rootless podman the model mount gets an SELinux label llama.cpp cannot read.
@@ -83,7 +97,7 @@ bootc status
 for c in "sbx version" "llmman --version" "herdr --version" "opencode --version" \
          "codex --version" "claude --version" "openclaw --version" "goose --version" \
          "codexbar --version" "qemu-img --version"; do
-  as_test "$c"
+  retry as_test "$c"
 done
 
 # The desktop apps: launcher, menu entry, and every shared library of the
@@ -103,8 +117,10 @@ google-chrome-stable google-chrome         lib/google-chrome/chrome
 codexbar-linux       com.steipete.CodexBar bin/codexbar-linux
 EOF
 # Except CodexBar's, which starts offscreen as at login: wait for its socket,
-# check its Settings see autostart enabled, quit
-as_test "QT_QPA_PLATFORM=offscreen timeout 120 /usr/libexec/codexbar-autostart &
+# check its Settings see autostart enabled, quit. It is stopped on any failure,
+# so a retry starts clean.
+retry as_test "QT_QPA_PLATFORM=offscreen timeout 120 /usr/libexec/codexbar-autostart &
+  trap 'kill \$(jobs -p) 2>/dev/null; wait' EXIT
   for i in \$(seq 60); do codexbar-linux --snapshot >/dev/null 2>&1 && break; sleep 1; done
   codexbar-linux --autostart status | grep -q '\"enabled\":true' && codexbar-linux --quit && wait"
 
@@ -154,17 +170,15 @@ if [ "$inference" != 0 ]; then
       [ -n "$tag" ] && seed_llama_cpp "$tag" || sleep 30
     done
   fi
-  # Three tries, as for the agents' turns below: the pull is a chain of
-  # registry requests through the host's network and has timed out on one
-  as_test "llmman pull qwen3.5:0.8b" || as_test "llmman pull qwen3.5:0.8b" ||
-    as_test "llmman pull qwen3.5:0.8b"
+  # The pull is a chain of registry requests and has timed out on one
+  retry as_test "llmman pull qwen3.5:0.8b"
   prompt="Reply with exactly the word OK and nothing else"
   for c in "opencode -- run '$prompt'" \
            "claude -- -p '$prompt'" \
            "codex -- exec --skip-git-repo-check '$prompt'" \
            "openclaw -- agent --local -m '$prompt'"; do
     turn="timeout 1800 llmman launch ${c%% *} --model qwen3.5:0.8b ${c#* }"
-    as_test "$turn" || as_test "$turn" || as_test "$turn"
+    retry as_test "$turn"
   done
 fi
 echo SMOKE PASS
