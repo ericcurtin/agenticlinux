@@ -1,8 +1,9 @@
 name: Retry
 
 # A hosted runner now and then dies mid-job ("lost communication with the
-# server"), failing a Build run that is otherwise green. Re-run the failed jobs
-# when that is the only kind of failure; anything else stays red.
+# server") or is so slow that a job hits its timeout-minutes, failing a Build
+# run that is otherwise green. Re-run the failed jobs when that is the only
+# kind of failure; anything else stays red.
 on:
   workflow_run:
     workflows: [Build]
@@ -10,7 +11,9 @@ on:
 
 jobs:
   retry:
-    if: github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.run_attempt < 3
+    # A timed-out job, and its run, end "cancelled", like a superseded run; the
+    # annotations below tell them apart
+    if: (github.event.workflow_run.conclusion == 'failure' || github.event.workflow_run.conclusion == 'cancelled') && github.event.workflow_run.run_attempt < 3
     runs-on: ubuntu-24.04
     permissions:
       actions: write
@@ -21,18 +24,20 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RUN: ${{ github.event.workflow_run.id }}
           ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
-          LOST: lost communication with the server|received a shutdown signal
+          TRANSIENT: lost communication with the server|received a shutdown signal|exceeded the maximum execution time
         run: |
           jobs=$(gh api --paginate "repos/$GH_REPO/actions/runs/$RUN/attempts/$ATTEMPT/jobs?per_page=100" \
-            --jq '.jobs[] | select(.conclusion == "failure") | "\(.id)\t\(.name)"')
+            --jq '.jobs[] | select(.conclusion | IN("failure", "cancelled", "timed_out")) | "\(.id)\t\(.name)"')
           [ -n "$jobs" ] || exit 0
-          # Every failed job must have failed only by losing its runner
+          # Every failed job must have failed only by losing its runner or
+          # timing out. Every cancelled job also says "The operation was
+          # canceled."; ignore it, the message left is the reason.
           while IFS=$'\t' read -r id name; do
             msgs=$(gh api --paginate "repos/$GH_REPO/check-runs/$id/annotations?per_page=100" \
-              --jq '.[] | select(.annotation_level == "failure") | .message | gsub("\n"; " ")')
+              --jq '.[] | select(.annotation_level == "failure") | .message | gsub("\n"; " ") | select(. != "The operation was canceled.")')
             echo "$name: ${msgs:-no failure annotation}"
-            if [ -z "$msgs" ] || grep -vqE "$LOST" <<<"$msgs"; then
-              echo "not a lost runner, not retrying"
+            if [ -z "$msgs" ] || grep -vqE "$TRANSIENT" <<<"$msgs"; then
+              echo "not a runner problem, not retrying"
               exit 0
             fi
           done <<<"$jobs"
