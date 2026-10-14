@@ -117,9 +117,22 @@ gpgcheck=1
 gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-EPEL-${RELEASE}
 EOF
 fi
-dnf -y install \
-  "https://mirrors.rpmfusion.org/free/${RPMFUSION}/rpmfusion-free-release-${RELEASE}.noarch.rpm" \
-  "https://mirrors.rpmfusion.org/nonfree/${RPMFUSION}/rpmfusion-nonfree-release-${RELEASE}.noarch.rpm"
+# dnf has no mirror list to fail over in for these two bare URLs.
+# mirrors.rpmfusion.org redirects to one mirror, and when that stalls
+# (mirror.fcix.net did) so does every retry. download1 is the origin: try it
+# first.
+rpmfusion_release() {
+  local host t urls
+  for host in download1 mirrors; do
+    urls=()
+    for t in free nonfree; do
+      urls+=("https://${host}.rpmfusion.org/${t}/${RPMFUSION}/rpmfusion-${t}-release-${RELEASE}.noarch.rpm")
+    done
+    command dnf -y install "${urls[@]}" && return
+  done
+  return 1
+}
+retry rpmfusion_release
 for r in "https://download.docker.com/linux/${DISTRO}/docker-ce.repo" \
          https://mise.jdx.dev/rpm/mise.repo \
          https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo; do

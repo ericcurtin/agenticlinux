@@ -287,11 +287,14 @@ jobs:
         run: brew install qemu
       - if: runner.os == 'Windows'
         shell: bash
-        # qemu.weilnetz.de has been unreachable from a runner
+        # qemu.weilnetz.de and the Chocolatey feed (504) have both failed from
+        # a runner. On the feed's failure choco exits 0, so test for qemu.
         run: |
-          for i in 1 2 3; do
-            choco install -y --no-progress qemu && break
-            [ "$i" -lt 3 ] || exit 1
+          export PATH="$PATH:/c/Program Files/qemu"
+          for i in 1 2 3 4 5; do
+            choco install -y --no-progress qemu || true
+            command -v qemu-system-x86_64 && break
+            [ "$i" -lt 5 ] || { echo "qemu did not install" >&2; exit 1; }
             sleep $((i * 30))
           done
           echo 'C:\Program Files\qemu' >> "$GITHUB_PATH"
