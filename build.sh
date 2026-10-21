@@ -52,7 +52,20 @@ curl() { command curl -fsSL --retry 12 --retry-delay 20 --retry-all-errors "$@";
 # however often it is retried. It also supplements vlc-plugins-base, so once
 # EPEL catches up any transaction would pull it in: it is excluded from all of
 # them, and the image is the same whichever repository is ahead.
-dnf() { retry command dnf --exclude=vlc-plugins-freeworld "$@"; }
+#
+# A failed attempt also drops the cached repository metadata. dnf keeps what it
+# downloaded for the rest of the build, so a retry plans the same transaction
+# again, and when the metadata is stale that fails the same way every time: one
+# build's was from before Fedora replaced fzf 0.74.4 with 0.74.5, every mirror
+# answered 404 for 0.74.4, and all 12 attempts asked for it again while the
+# other builds, minutes apart, found 0.74.5. The output goes to stderr: callers
+# capture stdout.
+dnf_try() {
+  command dnf --exclude=vlc-plugins-freeworld "$@" && return
+  command dnf clean metadata >&2 || true
+  return 1
+}
+dnf() { retry dnf_try "$@"; }
 
 # A repository's version tags (v1.2.3, no prereleases), newest first, from its
 # releases URL. Not from releases.atom: that feed answered 502/504 for minutes
