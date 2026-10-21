@@ -24,11 +24,14 @@ ARG RECHUNKER=quay.io/fedora/fedora-bootc:44
 
 # bootguard (automatic rollback of a failed update) is built on the variant's own
 # base, so it links against the distribution it runs on. dnf gets the patience
-# build.sh gives it; cargo has its own retries for crates.io. HOME is /tmp as in
-# build.sh: /root is a dangling symlink in these images, so cargo cannot use it.
+# build.sh gives it, including fresh metadata for every retry (stale metadata
+# fails the same way each time); cargo has its own retries for crates.io. HOME
+# is /tmp as in build.sh: /root is a dangling symlink in these images, so cargo
+# cannot use it.
 FROM ${BASE} AS bootguard
 RUN for i in $(seq 12); do dnf install -y cargo && break; \
-      [ "$i" -lt 12 ] || exit 1; echo "dnf failed, retrying in 20 s ($i/12)" >&2; sleep 20; \
+      [ "$i" -lt 12 ] || exit 1; echo "dnf failed, retrying in 20 s ($i/12)" >&2; \
+      dnf clean metadata >&2; sleep 20; \
     done
 ENV HOME=/tmp CARGO_NET_RETRY=12
 COPY bootguard/Cargo.toml bootguard/Cargo.lock /src/
