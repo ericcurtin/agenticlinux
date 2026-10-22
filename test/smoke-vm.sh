@@ -93,6 +93,16 @@ else
   loginctl disable-linger test
 fi
 
+# /tmp is /var/tmp bind-mounted over it, not a tmpfs (tmp.mount.d in this
+# image): the same directory, on the root filesystem, nosuid and nodev. A
+# container has no tmp.mount.
+if ! systemd-detect-virt -cq; then
+  test "$(stat -c %d:%i /tmp)" = "$(stat -c %d:%i /var/tmp)"
+  test "$(findmnt -no FSTYPE /tmp)" != tmpfs
+  findmnt -no OPTIONS /tmp | grep -q nosuid
+  findmnt -no OPTIONS /tmp | grep -q nodev
+fi
+
 bootc status
 for c in "sbx version" "llmman --version" "herdr --version" "opencode --version" \
          "codex --version" "claude --version" "openclaw --version" "goose --version" \

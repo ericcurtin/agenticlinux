@@ -140,6 +140,12 @@ sudo bootc switch docker.io/ericcurtin044/agenticlinux:kde
 The root filesystem (which holds `/var`, `/home` and `/root`) defaults to xfs
 for both `bootc install` and the ISO.
 
+`/tmp` is not a tmpfs: it is `/var/tmp` mounted over it, so one directory on that
+filesystem, not limited by RAM. A build that leaves gigabytes there (a cargo
+target directory, a Go build cache) cannot fill memory and break everything
+else that writes to `/tmp`. It survives a reboot, and systemd-tmpfiles still
+removes files older than 10 days.
+
 The images are not signed: pulling one, from the ISO or `bootc switch`, relies
 on Docker Hub over HTTPS.
 
