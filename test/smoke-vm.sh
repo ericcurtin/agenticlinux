@@ -182,6 +182,12 @@ if [ "$inference" != 0 ]; then
   fi
   # The pull is a chain of registry requests and has timed out on one
   retry as_test "llmman pull qwen3.5:0.8b"
+  # OpenClaw's computer and nodes tools need a Gateway, which "agent --local"
+  # does not start. The model now and then calls one ("computer key OK"), gets
+  # the same error every time and retries until the timeout, on all three
+  # attempts. Deny them; onboarding leaves an existing tools policy alone.
+  runuser -l test -c "mkdir -p ~/.openclaw &&
+    echo '{\"tools\":{\"deny\":[\"group:nodes\"]}}' > ~/.openclaw/openclaw.json"
   prompt="Reply with exactly the word OK and nothing else"
   for c in "opencode -- run '$prompt'" \
            "claude -- -p '$prompt'" \
@@ -189,6 +195,31 @@ if [ "$inference" != 0 ]; then
            "openclaw -- agent --local -m '$prompt'"; do
     turn="timeout 1800 llmman launch ${c%% *} --model qwen3.5:0.8b ${c#* }"
     retry as_test "$turn"
+  done
+fi
+
+# /tmp and /var/tmp are one directory on disk, which nothing empties at
+# shutdown the way a tmpfs is: agenticlinux-clean-var-tmp.service does, in its
+# ExecStop, which stopping the unit runs. Last, because it also removes the
+# PrivateTmp directories of running services. The dotfile, symlink and fifo are
+# what rm -rf /var/tmp/* or a confined find would leave behind.
+if ! systemd-detect-virt -cq; then
+  unit=agenticlinux-clean-var-tmp.service
+  systemctl is-enabled "$unit"
+  systemctl is-active "$unit"
+  # Stops after the bootguard arm step, whose bootc writes to /tmp
+  [[ " $(systemctl show -p Before --value "$unit") " == *" agenticlinux-bootguard-arm.service "* ]]
+  mkdir -p /var/tmp/clean-test/sub
+  touch /var/tmp/clean-test/sub/file /var/tmp/.clean-test-dotfile /tmp/clean-test-file
+  ln -s /nonexistent /var/tmp/clean-test/link
+  mkfifo /var/tmp/clean-test/fifo
+  systemctl stop "$unit"
+  for f in /var/tmp/clean-test /var/tmp/.clean-test-dotfile /tmp/clean-test-file; do
+    test ! -e "$f"
+  done
+  # The directory stays: it is the mount point of /tmp
+  for d in /var/tmp /tmp; do
+    test "$(stat -c %a "$d")" = 1777
   done
 fi
 echo SMOKE PASS

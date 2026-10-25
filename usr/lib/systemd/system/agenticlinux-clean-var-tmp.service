@@ -1,0 +1,22 @@
+[Unit]
+Description=Empty /var/tmp (and so /tmp) on shutdown and reboot
+DefaultDependencies=no
+RequiresMountsFor=/var/tmp
+# Units stop in reverse start order, so starting before sysinit.target (ahead of
+# every ordinary service) makes this stop after them. The bootguard arm step and
+# the finalizers are ordered by hand, and bootc writes to /tmp there.
+Before=sysinit.target shutdown.target agenticlinux-bootguard-arm.service ostree-finalize-staged.service bootc-finalize-staged.service
+# Without Conflicts= systemd never stops this unit, so ExecStop never runs.
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/true
+# systemd-tmpfiles, not find or rm: it runs in SELinux's tmpfiles domain, which
+# may remove every kind of file in /tmp, and it does not descend into mounts.
+# Best effort ("-"); the default stop timeout cuts a huge /var/tmp short.
+ExecStop=-/usr/bin/systemd-tmpfiles --remove /usr/lib/agenticlinux/clean-var-tmp.conf
+
+[Install]
+WantedBy=sysinit.target
