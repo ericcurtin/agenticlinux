@@ -182,19 +182,22 @@ if [ "$inference" != 0 ]; then
   fi
   # The pull is a chain of registry requests and has timed out on one
   retry as_test "llmman pull qwen3.5:0.8b"
-  # OpenClaw's computer and nodes tools need a Gateway, which "agent --local"
-  # does not start. The model now and then calls one ("computer key OK"), gets
-  # the same error every time and retries until the timeout, on all three
-  # attempts. Deny them; onboarding leaves an existing tools policy alone.
-  runuser -l test -c "mkdir -p ~/.openclaw &&
-    echo '{\"tools\":{\"deny\":[\"group:nodes\"]}}' > ~/.openclaw/openclaw.json"
   prompt="Reply with exactly the word OK and nothing else"
   for c in "opencode -- run '$prompt'" \
            "claude -- -p '$prompt'" \
            "codex -- exec --skip-git-repo-check '$prompt'" \
            "openclaw -- agent --local -m '$prompt'"; do
-    turn="timeout 1800 llmman launch ${c%% *} --model qwen3.5:0.8b ${c#* }"
-    retry as_test "$turn"
+    agent=${c%% *}
+    launch="timeout 1800 llmman launch $agent --model qwen3.5:0.8b"
+    if [ "$agent" = openclaw ]; then
+      # Its computer and nodes tools need a Gateway, which "agent --local" lacks:
+      # a model that calls one retries until the timeout. Deny them, but only
+      # after llmman has onboarded (a launch that runs no turn): it skips that
+      # when openclaw.json exists, leaving OpenClaw on its default model.
+      retry as_test "$launch -- --version"
+      as_test "openclaw config set tools.deny '[\"group:nodes\"]' --strict-json"
+    fi
+    retry as_test "$launch ${c#* }"
   done
 fi
 
