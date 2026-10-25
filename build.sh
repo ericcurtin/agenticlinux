@@ -573,7 +573,8 @@ if [ "$DISTRO" = centos ] && [ "$DESKTOP" != "no desktop" ]; then
   fi
 fi
 
-systemctl enable docker.service
+# The second empties /tmp (it is /var/tmp) on shutdown, as the tmpfs it replaced
+systemctl enable docker.service agenticlinux-clean-var-tmp.service
 
 # The base images keep file capabilities (newuidmap's, which rootless podman
 # needs) in ostree's own metadata, which BuildKit does not apply, so the
