@@ -190,12 +190,13 @@ if [ "$inference" != 0 ]; then
     agent=${c%% *}
     launch="timeout 1800 llmman launch $agent --model qwen3.5:0.8b"
     if [ "$agent" = openclaw ]; then
-      # Its computer and nodes tools need a Gateway, which "agent --local" lacks:
-      # a model that calls one retries until the timeout. Deny them, but only
-      # after llmman has onboarded (a launch that runs no turn): it skips that
-      # when openclaw.json exists, leaving OpenClaw on its default model.
+      # No tools: the turn only asks for a word, and a 0.8b model that has
+      # them calls one with bad arguments (write on a directory, ls on a
+      # doubled path) until OpenClaw aborts, on every retry. Deny all, not one
+      # group at a time. After llmman has onboarded (a launch that runs no
+      # turn): it skips that when openclaw.json exists.
       retry as_test "$launch -- --version"
-      as_test "openclaw config set tools.deny '[\"group:nodes\"]' --strict-json"
+      as_test "openclaw config set tools.deny '[\"*\"]' --strict-json"
     fi
     retry as_test "$launch ${c#* }"
   done
