@@ -194,9 +194,11 @@ if [ "$inference" != 0 ]; then
       # them calls one with bad arguments (write on a directory, ls on a
       # doubled path) until OpenClaw aborts, on every retry. Deny all, not one
       # group at a time. After llmman has onboarded (a launch that runs no
-      # turn): it skips that when openclaw.json exists.
+      # turn): it skips that when openclaw.json exists. tools.deny leaves Tool
+      # Search on (tool_search, tool_describe), which the model misuses the
+      # same way, so switch it off too. --merge keeps the tools profile.
       retry as_test "$launch -- --version"
-      as_test "openclaw config set tools.deny '[\"*\"]' --strict-json"
+      as_test "openclaw config set tools '{\"deny\":[\"*\"],\"toolSearch\":false}' --strict-json --merge"
     fi
     retry as_test "$launch ${c#* }"
   done
